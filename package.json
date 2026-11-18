@@ -4,6 +4,7 @@
   "description": "Send editor context to T3 Code and list its threads in a sidebar.",
   "version": "0.0.2",
   "publisher": "local",
+  "license": "MIT",
   "engines": { "vscode": "^1.85.0" },
   "main": "./extension.js",
   "extensionKind": ["workspace"],
