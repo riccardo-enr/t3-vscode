@@ -66,6 +66,23 @@ async function openLink(url) {
   if (!ok) vscode.window.showErrorMessage("T3 Code: could not open the link. Is the desktop app installed?");
 }
 
+// Change stamp of T3's state DB ($T3CODE_HOME or ~/.t3, then userdata/statev2.sqlite[-wal]).
+// Every T3 write touches one of them, so an unchanged stamp means no thread changed and a poll can be
+// skipped. undefined when neither file exists: callers then poll as usual.
+// ponytail: the WAL moves every few seconds while any thread anywhere runs, so this only saves CPU when T3 is idle.
+function stateStamp() {
+  const fs = require("fs"), path = require("path");
+  const dir = path.join(process.env.T3CODE_HOME || path.join(require("os").homedir(), ".t3"), "userdata");
+  const s = ["statev2.sqlite-wal", "statev2.sqlite"].map((f) => {
+    try {
+      return fs.statSync(path.join(dir, f)).mtimeMs;
+    } catch (e) {
+      return "";
+    }
+  }).join();
+  return s === "," ? undefined : s;
+}
+
 // Run the t3 CLI. Resolves with stdout only (log lines can land on stderr).
 function t3(args, input) {
   return new Promise((resolve, reject) => {
@@ -315,12 +332,16 @@ class Chat {
     if (!v || !v.visible) return;
     if (!this.thread) return v.webview.postMessage({ empty: true });
     if (this.busy && !force) return; // skip a tick while the previous `t3 thread show` is still running
-    this.busy = true;
     const id = this.thread.threadId;
+    const stamp = stateStamp(); // taken before the call, so a change during the call is seen next tick
+    if (!force && stamp && stamp === this.stamp && id === this.stampId) return; // nothing changed in T3
+    this.busy = true;
     const seq = (this.seq = (this.seq || 0) + 1);
     try {
       const out = JSON.parse(await t3(["thread", "show", id, "--messages", "1000", "--json"]));
       if (seq !== this.seq) return; // a newer poll started (thread switch or send): drop this stale result
+      this.stamp = stamp; // only after a good poll, so a failed one is retried
+      this.stampId = id;
       if (this.status && this.status !== out.thread.status && this.onStatus) this.onStatus(); // refresh tree icons
       this.status = out.thread.status;
       const s = JSON.stringify([id, out.thread.status, out.messages]);
@@ -515,10 +536,14 @@ function watchThreads(context, provider, chat) {
       show(`T3 Code: "${t.title || t.threadId}" ${t.status}.`, "Open chat").then((a) => a && chat.open(t));
     }
   };
+  let seenStamp; // separate from the chat's, so one poller never hides a change from the other
   const tick = async () => {
     if (Date.now() - (provider.listedAt || 0) < 14000) return; // the tree listed recently: reuse it
+    const stamp = stateStamp();
+    if (stamp && stamp === seenStamp) return; // T3 state unchanged since the last good list
     try {
       const list = await listThreads();
+      seenStamp = stamp;
       provider.listedAt = Date.now();
       provider.list = list;
       provider.onList(list);
@@ -554,4 +579,4 @@ function activate(context) {
   );
 }
 
-module.exports = { activate, ago, prettyModel };
+module.exports = { activate, ago, prettyModel, stateStamp };
