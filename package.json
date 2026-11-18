@@ -26,6 +26,11 @@
       { "command": "t3code.openWorktree", "title": "T3 Code: Open worktree in Source Control", "icon": "$(source-control)" },
       { "command": "t3code.askFix", "title": "T3 Code: Ask T3 to fix" }
     ],
+    "keybindings": [
+      { "command": "t3code.sendSelection", "key": "ctrl+alt+shift+d", "mac": "cmd+alt+shift+d", "when": "editorHasSelection" },
+      { "command": "t3code.sendToThread", "key": "ctrl+alt+shift+s", "mac": "cmd+alt+shift+s", "when": "editorHasSelection" },
+      { "command": "t3code.chat.focus", "key": "ctrl+alt+shift+c", "mac": "cmd+alt+shift+c" }
+    ],
     "viewsContainers": {
       "activitybar": [{ "id": "t3code", "title": "T3 Code", "icon": "icon.svg" }]
     },
