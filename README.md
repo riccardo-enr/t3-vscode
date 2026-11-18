@@ -125,3 +125,9 @@ Files:
   all message text escaped before rendering).
 - [package.json](package.json): views, commands, menus.
 - [test/chat_check.js](test/chat_check.js): self-check for the webview rendering.
+
+## Credits
+
+The activity-bar icon ([icon.svg](icon.svg)) uses the T3 glyphs from the T3 Code logo
+(`assets/prod/logo.svg` in [pingdotgg/t3code](https://github.com/pingdotgg/t3code)), MIT License,
+Copyright (c) 2026 T3 Tools Inc.
