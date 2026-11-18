@@ -87,6 +87,22 @@ function stateStamp() {
 // T3 snapshots the project repo after each turn as refs/t3/orchestration-v2/checkpoints/<H>/ordinal/<N>
 // (N = 0 is the state before the first turn). <H> is base64 (no '=' padding) of the first 32 hex chars of
 // sha256("checkpoint-scope:thread:<threadId>:name:root"); verified against real refs on 2026-11-18.
+// Pasted images go to /tmp, which this system empties at boot and after 30 days, so no cleanup code.
+const IMAGE_DIR = require("path").join(require("os").tmpdir(), "t3-vscode-images");
+const IMAGE_EXT = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
+function saveImage(dataUrl, dir = IMAGE_DIR) {
+  const fs = require("fs"), path = require("path");
+  const m = /^data:(image\/[a-z]+);base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+  if (!m || !IMAGE_EXT[m[1]]) throw new Error("only png, jpeg, gif or webp");
+  const buf = Buffer.from(m[2], "base64");
+  if (buf.length > 20e6) throw new Error("larger than 20 MB");
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const file = path.join(dir, `paste-${stamp}-${require("crypto").randomBytes(3).toString("hex")}.${IMAGE_EXT[m[1]]}`);
+  fs.writeFileSync(file, buf, { mode: 0o600, flag: "wx" });
+  return file;
+}
+
 function checkpointScope(threadId) {
   const hex = require("crypto").createHash("sha256").update(`checkpoint-scope:thread:${threadId}:name:root`).digest("hex");
   return Buffer.from(hex.slice(0, 32)).toString("base64").replace(/=+$/, "");
@@ -420,6 +436,14 @@ class Chat {
       if (m.url) return /^https?:\/\//.test(m.url) && vscode.env.openExternal(vscode.Uri.parse(m.url));
       if (typeof m.copy === "string") return vscode.env.clipboard.writeText(m.copy);
       if (m.openInApp) return openThread(this.thread); // model and effort can only be changed in the app
+      if (typeof m.image === "string") {
+        try {
+          view.webview.postMessage({ imagePath: saveImage(m.image) });
+        } catch (e) {
+          view.webview.postMessage({ imageError: e.message });
+        }
+        return;
+      }
       if (typeof m.text !== "string" || !m.text.trim()) return; // only an explicit composer send reaches `t3 thread send`
       // The webview keeps the typed text until it gets {sent}, so a failed send loses nothing.
       if (!this.thread) return view.webview.postMessage({ sendError: "click a thread first" });
@@ -749,4 +773,4 @@ function activate(context) {
   );
 }
 
-module.exports = { activate, ago, prettyModel, stateStamp, checkpointScope };
+module.exports = { activate, ago, prettyModel, stateStamp, checkpointScope, saveImage };

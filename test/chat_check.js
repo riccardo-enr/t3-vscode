@@ -25,8 +25,19 @@ const { md, body, collapse } = ctx;
 // extension.js only touches `vscode` inside functions, so an empty stub is enough to load it.
 const Module = require("module"), load = Module._load;
 Module._load = (req, ...a) => (req === "vscode" ? {} : load(req, ...a));
-const { prettyModel, ago, stateStamp, checkpointScope } = require("../extension.js");
+const { prettyModel, ago, stateStamp, checkpointScope, saveImage } = require("../extension.js");
 Module._load = load;
+
+// Pasted images: saved with the right extension and bytes; other types and junk are refused.
+{
+  const dir = fs.mkdtempSync(path.join(require("os").tmpdir(), "t3img-"));
+  const p = saveImage("data:image/png;base64," + Buffer.from("PNGDATA").toString("base64"), dir);
+  assert(p.startsWith(dir) && p.endsWith(".png") && fs.readFileSync(p, "utf8") === "PNGDATA");
+  assert.throws(() => saveImage("data:image/svg+xml;base64,PHN2Zz4=", dir));
+  assert.throws(() => saveImage("data:text/html;base64,PGI+", dir));
+  assert.throws(() => saveImage("not a data url", dir));
+  fs.rmSync(dir, { recursive: true });
+}
 
 assert.strictEqual(prettyModel("claude-opus-5-5"), "Opus 5.5");
 assert.strictEqual(prettyModel("gpt-5.4"), "gpt-5.4");

@@ -267,6 +267,22 @@ modelEl.onkeydown = (e) => {
   }
 };
 t.oninput = grow;
+// A pasted image is saved to a file by the extension; its path goes into the message (the CLI has no attachments).
+t.onpaste = (e) => {
+  const f = [...((e.clipboardData && e.clipboardData.files) || [])].find((x) => x.type.startsWith("image/"));
+  if (!f) return;
+  e.preventDefault();
+  const r = new FileReader();
+  r.onload = () => vs.postMessage({ image: r.result });
+  r.readAsDataURL(f);
+};
+function insert(s) {
+  const a = t.selectionStart, b = t.selectionEnd, pad = a && !/\s$/.test(t.value.slice(0, a)) ? " " : "";
+  t.value = t.value.slice(0, a) + pad + s + " " + t.value.slice(b);
+  t.selectionStart = t.selectionEnd = a + pad.length + s.length + 1;
+  grow();
+  t.focus();
+}
 t.onkeydown = (e) => {
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
     e.preventDefault();
@@ -279,6 +295,8 @@ addEventListener("message", (e) => {
   if (d.error) { st.className = "err"; st.textContent = "error: " + d.error; if (!skel.hidden) mode(""); return; }
   if (d.empty) { switchTo(""); emptyTxt.textContent = PICK; mode("empty"); st.textContent = ""; modelEl.textContent = ""; work.hidden = true; return; }
   if (d.loading) { switchTo(d.threadId); mode(log.children.length ? "" : "loading"); header(d); return; }
+  if (d.imagePath) return insert(d.imagePath);
+  if (d.imageError) { st.className = "err"; st.textContent = "image not saved: " + d.imageError; return; }
   if (d.sent) {
     if (pend) pend.node.classList.remove("pending");
     t.value = "";
