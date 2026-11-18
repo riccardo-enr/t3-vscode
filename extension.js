@@ -111,7 +111,7 @@ function ago(iso, now = Date.now()) {
     if (s >= n) return Math.floor(s / n) + u + " ago";
 }
 
-// Status -> [codicon, theme color]. Anything unknown falls back to a plain chat icon.
+// Status -> [codicon, theme color]. Anything unknown (e.g. "idle") falls back to a plain chat icon.
 const STATUS_ICON = {
   running: ["loading~spin", "charts.blue"],
   waiting: ["bell", "charts.yellow"],
@@ -119,6 +119,7 @@ const STATUS_ICON = {
   failed: ["error", "errorForeground"],
   error: ["error", "errorForeground"],
   interrupted: ["debug-pause", "charts.orange"],
+  cancelled: ["circle-slash", undefined],
 };
 
 class Threads {

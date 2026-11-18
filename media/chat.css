@@ -11,6 +11,8 @@ button{font:inherit;cursor:pointer}
 #st[data-s=running]::before{background:var(--vscode-charts-blue);animation:pulse 1.4s ease-in-out infinite}
 #st[data-s=waiting]::before{background:var(--vscode-charts-yellow)}
 #st[data-s=completed]::before{background:var(--vscode-charts-green)}
+#st[data-s=failed]::before,#st[data-s=error]::before{background:var(--vscode-errorForeground)}
+#st[data-s=interrupted]::before{background:var(--vscode-charts-orange)}
 #st.err{color:var(--vscode-errorForeground)}
 #st.err::before{background:var(--vscode-errorForeground);animation:none}
 
