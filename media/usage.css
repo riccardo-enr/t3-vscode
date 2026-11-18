@@ -1,0 +1,27 @@
+/* Usage panel. Only --vscode-* theme variables. */
+body{font-family:var(--vscode-font-family);font-size:var(--vscode-font-size);color:var(--vscode-foreground);background:var(--vscode-editor-background);margin:0;padding:20px 28px;max-width:900px}
+:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:1px}
+header{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+h1{font-size:1.3em;font-weight:600;margin:0;flex:1}
+.seg{display:flex}
+.seg input{position:absolute;opacity:0}
+.seg label{padding:3px 12px;cursor:pointer;border:1px solid var(--vscode-button-secondaryBackground,var(--vscode-widget-border));background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}
+.seg input:checked+label{background:var(--vscode-button-background);color:var(--vscode-button-foreground)}
+.seg input:focus-visible+label{outline:1px solid var(--vscode-focusBorder)}
+button{font:inherit;cursor:pointer;padding:3px 12px;border:1px solid var(--vscode-widget-border,transparent);background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}
+#st{min-height:18px;color:var(--vscode-descriptionForeground)}
+#st.err{color:var(--vscode-errorForeground)}
+#tiles{display:flex;gap:12px;margin:8px 0 20px}
+.tile{flex:1;padding:12px 14px;background:var(--vscode-sideBar-background);border:1px solid var(--vscode-widget-border,transparent);border-radius:4px}
+.tile .v{font-size:1.7em;font-weight:600}
+.tile .l,.dim,#note{color:var(--vscode-descriptionForeground)}
+#chart{display:flex;align-items:stretch;gap:3px;height:150px;margin-bottom:24px}
+.col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;min-width:0}
+.bar{background:var(--vscode-charts-blue);min-height:1px;border-radius:2px 2px 0 0}
+.col .d{font-size:10px;text-align:center;color:var(--vscode-descriptionForeground);white-space:nowrap;overflow:hidden;margin-top:3px}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-weight:600;color:var(--vscode-descriptionForeground);font-size:11px;padding:4px 8px;border-bottom:1px solid var(--vscode-widget-border)}
+td{padding:5px 8px;border-bottom:1px solid var(--vscode-widget-border,transparent)}
+.n{text-align:right;font-variant-numeric:tabular-nums}
+th.n{text-align:right}
+#note{margin-top:10px;font-size:11px}

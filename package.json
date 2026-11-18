@@ -19,6 +19,7 @@
       { "command": "t3code.refresh", "title": "T3 Code: Refresh threads", "icon": "$(refresh)" },
       { "command": "t3code.openThread", "title": "T3 Code: Open in T3 Code app" },
       { "command": "t3code.openChat", "title": "T3 Code: Open chat" },
+      { "command": "t3code.openUsage", "title": "T3 Code: Open usage dashboard" },
       { "command": "t3code.chatRefresh", "title": "T3 Code: Refresh chat", "icon": "$(refresh)" },
       { "command": "t3code.chatOpenInApp", "title": "T3 Code: Open chat thread in T3 Code app", "icon": "$(link-external)" }
     ],

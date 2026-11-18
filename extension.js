@@ -1,5 +1,6 @@
 const vscode = require("vscode");
 const { execFile } = require("child_process");
+const { fetchSummary, summarize } = require("./usage.js");
 
 // T3 Code rejects (does not truncate) link prompts over 8000 chars; stay under it.
 // Also applied to CLI sends for simplicity.
@@ -63,23 +64,6 @@ async function openLink(url) {
   }
   const ok = await vscode.env.openExternal(vscode.Uri.parse(url, true));
   if (!ok) vscode.window.showErrorMessage("T3 Code: could not open the link. Is the desktop app installed?");
-}
-
-// Change stamp of T3's state DB ($T3CODE_HOME or ~/.t3, then userdata/statev2.sqlite[-wal]).
-// Every T3 write touches one of them, so an unchanged stamp means no thread changed and a poll can be
-// skipped. undefined when neither file exists: callers then poll as usual.
-// ponytail: the WAL moves every few seconds while any thread anywhere runs, so this only saves CPU when T3 is idle.
-function stateStamp() {
-  const fs = require("fs"), path = require("path");
-  const dir = path.join(process.env.T3CODE_HOME || path.join(require("os").homedir(), ".t3"), "userdata");
-  const s = ["statev2.sqlite-wal", "statev2.sqlite"].map((f) => {
-    try {
-      return fs.statSync(path.join(dir, f)).mtimeMs;
-    } catch (e) {
-      return "";
-    }
-  }).join();
-  return s === "," ? undefined : s;
 }
 
 // Run the t3 CLI. Resolves with stdout only (log lines can land on stderr).
@@ -331,16 +315,12 @@ class Chat {
     if (!v || !v.visible) return;
     if (!this.thread) return v.webview.postMessage({ empty: true });
     if (this.busy && !force) return; // skip a tick while the previous `t3 thread show` is still running
-    const id = this.thread.threadId;
-    const stamp = stateStamp(); // taken before the call, so a change during the call is seen next tick
-    if (!force && stamp && stamp === this.stamp && id === this.stampId) return; // nothing changed in T3
     this.busy = true;
+    const id = this.thread.threadId;
     const seq = (this.seq = (this.seq || 0) + 1);
     try {
       const out = JSON.parse(await t3(["thread", "show", id, "--messages", "1000", "--json"]));
       if (seq !== this.seq) return; // a newer poll started (thread switch or send): drop this stale result
-      this.stamp = stamp; // only after a good poll, so a failed one is retried
-      this.stampId = id;
       if (this.status && this.status !== out.thread.status && this.onStatus) this.onStatus(); // refresh tree icons
       this.status = out.thread.status;
       const s = JSON.stringify([id, out.thread.status, out.messages]);
@@ -421,6 +401,45 @@ function chatHtml(webview, media) {
 <script nonce="${nonce}" src="${js}"></script></body></html>`;
 }
 
+// Usage dashboard: one editor-tab panel, reused if already open.
+let usagePanel;
+function openUsage(context) {
+  if (usagePanel) return usagePanel.reveal();
+  const media = vscode.Uri.joinPath(context.extensionUri, "media");
+  const panel = (usagePanel = vscode.window.createWebviewPanel("t3code.usage", "T3 Usage", vscode.ViewColumn.Active, {
+    enableScripts: true,
+    localResourceRoots: [media],
+  }));
+  panel.onDidDispose(() => (usagePanel = undefined));
+  const w = panel.webview;
+  const nonce = require("crypto").randomBytes(16).toString("hex");
+  const uri = (f) => w.asWebviewUri(vscode.Uri.joinPath(media, f)).with({ query: "v=" + nonce });
+  w.html = `<!doctype html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${w.cspSource}; script-src 'nonce-${nonce}';">
+<link rel="stylesheet" href="${uri("usage.css")}"></head><body>
+<header><h1>T3 Usage</h1>
+<div class="seg"><input type="radio" name="r" id="r7" checked><label for="r7">7 days</label><input type="radio" name="r" id="r30"><label for="r30">30 days</label></div>
+<button id="refresh">Refresh</button></header>
+<div id="st" role="status"></div>
+<div id="tiles"></div><div id="chart" role="img" aria-label="Cost per day"></div>
+<table><thead><tr><th>Model</th><th>Provider</th><th class="n">Tokens</th><th class="n">Cost</th></tr></thead><tbody id="rows"></tbody></table>
+<div id="note"></div>
+<script nonce="${nonce}" src="${uri("usage.js")}"></script></body></html>`;
+  let seq = 0; // a slow 30-day scan must not overwrite a newer 7-day answer
+  const load = async (days) => {
+    const mine = ++seq;
+    w.postMessage({ kind: "loading" });
+    try {
+      const data = summarize(await fetchSummary(days));
+      if (mine === seq) w.postMessage({ kind: "data", days, data });
+    } catch (e) {
+      log("usage: " + e.message);
+      if (mine === seq) w.postMessage({ kind: "error", message: "Could not read usage: " + e.message });
+    }
+  };
+  w.onDidReceiveMessage((m) => (m.ready ? load(7) : m.days && load(m.days)));
+}
+
 async function sendToThread(provider, arg) {
   const editor = vscode.window.activeTextEditor;
   if (!editor || editor.selection.isEmpty) {
@@ -443,6 +462,31 @@ async function sendToThread(provider, arg) {
     await t3(["thread", "send", thread.threadId, "-"], buildPrompt(editor) + note);
     vscode.window.showInformationMessage(`T3 Code: sent to "${thread.title || thread.threadId}".`);
     provider.refresh();
+  } catch (e) {
+    vscode.window.showErrorMessage("T3 Code: " + e.message);
+  }
+}
+
+// Start a new thread in this workspace's project from a typed message, then open it in the chat view.
+async function newThread(provider, chat) {
+  const folder = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
+  if (!folder) return vscode.window.showWarningMessage("T3 Code: open a folder first.");
+  const msg = await vscode.window.showInputBox({ prompt: "First message for the new T3 Code thread" });
+  if (!msg || !msg.trim()) return;
+  try {
+    const out = await t3(["thread", "start", folder.uri.fsPath, "-", "--json"], msg);
+    let id;
+    try {
+      const j = JSON.parse(out);
+      id = j.threadId || (j.thread && j.thread.threadId) || j.id;
+    } catch (e) {
+      id = out.trim().split(/\s+/).pop(); // plain-id output
+    }
+    log("new thread: " + id);
+    const t = (await listThreads()).find((x) => x.threadId === id);
+    provider.refresh();
+    if (t) chat.open(t);
+    else vscode.window.showInformationMessage("T3 Code: thread started.");
   } catch (e) {
     vscode.window.showErrorMessage("T3 Code: " + e.message);
   }
@@ -471,14 +515,10 @@ function watchThreads(context, provider, chat) {
       show(`T3 Code: "${t.title || t.threadId}" ${t.status}.`, "Open chat").then((a) => a && chat.open(t));
     }
   };
-  let seenStamp; // separate from the chat's, so one poller never hides a change from the other
   const tick = async () => {
     if (Date.now() - (provider.listedAt || 0) < 14000) return; // the tree listed recently: reuse it
-    const stamp = stateStamp();
-    if (stamp && stamp === seenStamp) return; // T3 state unchanged since the last good list
     try {
       const list = await listThreads();
-      seenStamp = stamp;
       provider.listedAt = Date.now();
       provider.list = list;
       provider.onList(list);
@@ -489,31 +529,6 @@ function watchThreads(context, provider, chat) {
   };
   tick();
   context.subscriptions.push(bar, { dispose: clearInterval.bind(null, setInterval(tick, 15000)) });
-}
-
-// Start a new thread in this workspace's project from a typed message, then open it in the chat view.
-async function newThread(provider, chat) {
-  const folder = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
-  if (!folder) return vscode.window.showWarningMessage("T3 Code: open a folder first.");
-  const msg = await vscode.window.showInputBox({ prompt: "First message for the new T3 Code thread" });
-  if (!msg || !msg.trim()) return;
-  try {
-    const out = await t3(["thread", "start", folder.uri.fsPath, "-", "--json"], msg);
-    let id;
-    try {
-      const j = JSON.parse(out);
-      id = j.threadId || (j.thread && j.thread.threadId) || j.id;
-    } catch (e) {
-      id = out.trim().split(/\s+/).pop(); // plain-id output
-    }
-    log("new thread: " + id);
-    const t = (await listThreads()).find((x) => x.threadId === id);
-    provider.refresh();
-    if (t) chat.open(t);
-    else vscode.window.showInformationMessage("T3 Code: thread started.");
-  } catch (e) {
-    vscode.window.showErrorMessage("T3 Code: " + e.message);
-  }
 }
 
 function activate(context) {
@@ -534,7 +549,8 @@ function activate(context) {
     vscode.commands.registerCommand("t3code.chatRefresh", () => chat.poll(true)),
     vscode.commands.registerCommand("t3code.chatOpenInApp", () => openThread(chat.thread)),
     vscode.commands.registerCommand("t3code.sendToThread", (arg) => sendToThread(provider, arg)),
-    vscode.commands.registerCommand("t3code.newThread", () => newThread(provider, chat))
+    vscode.commands.registerCommand("t3code.newThread", () => newThread(provider, chat)),
+    vscode.commands.registerCommand("t3code.openUsage", () => openUsage(context))
   );
 }
 
