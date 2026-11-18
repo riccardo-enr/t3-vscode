@@ -6,12 +6,9 @@ const work = document.getElementById("work");
 const t = document.getElementById("t");
 const btn = document.getElementById("b");
 const modelEl = document.getElementById("model");
-
-// "claude-opus-5-5" -> "Opus 5.5"; anything else is shown as is.
-function prettyModel(id) {
-  const m = /^claude-([a-z]+)-(\d+)-(\d+)/.exec(id || "");
-  return m ? m[1][0].toUpperCase() + m[1].slice(1) + " " + m[2] + "." + m[3] : id || "unknown model";
-}
+const emptyEl = document.getElementById("empty");
+const skel = document.getElementById("skel");
+const emptyTxt = document.getElementById("emptytxt");
 
 function el(tag, cls, txt) {
   const n = document.createElement(tag);
@@ -51,13 +48,16 @@ function md(src) {
   while (i < lines.length) {
     const l = lines[i];
     let m;
-    if (/^\s*```/.test(l)) {
+    if ((m = /^\s*```\s*([\w+#.-]*)/.exec(l))) {
       flushP(); flushL();
       const code = [];
       i++;
       while (i < lines.length && !/^\s*```/.test(lines[i])) code.push(lines[i++]);
       i++;
-      out.push("<pre><code>" + esc(code.join("\n")) + "</code></pre>");
+      out.push(
+        `<div class="code"><div class="ch"><span>${esc(m[1] || "text")}</span><button class="copy">Copy</button></div>` +
+          "<pre><code>" + esc(code.join("\n")) + "</code></pre></div>"
+      );
     } else if ((m = /^(#{1,6})\s+(.*)$/.exec(l))) {
       flushP(); flushL();
       const h = Math.min(m[1].length, 4);
@@ -92,7 +92,11 @@ const RE = /(!?)\[([^\]]*)\]\((t3-(?:citation|context):\/\/[^)\s]+)\)/g;
 function jump(q) {
   const key = q.trim().slice(0, 80);
   if (!key) return;
-  const hit = [...log.children].find((n) => n.classList.contains("assistant") && n._t.includes(key));
+  let hit = [...log.children].find((n) => (n.classList.contains("assistant") || n.classList.contains("fold")) && n._t.includes(key));
+  if (hit && hit.classList.contains("fold")) {
+    if (!hit.classList.contains("open")) hit.firstChild.click();
+    hit = [...hit.lastChild.children].find((n) => n._t.includes(key)) || hit;
+  }
   if (!hit) return;
   hit.scrollIntoView({ block: "center" });
   hit.classList.add("flash");
@@ -130,32 +134,91 @@ function body(text) {
   return b;
 }
 
-// ---- rendering: only changed messages are rebuilt, so selections survive polling ----
-let shown = [], thread = "";
+// ---- rendering: only changed items are rebuilt, so selections survive polling ----
+// Each run shows its user message(s) and only its LAST assistant message. The run's earlier
+// assistant messages (in-progress narration) fold into one {fold, runId} item just before it.
+function collapse(msgs) {
+  const last = new Map(), held = new Map(), out = [];
+  msgs.forEach((m, i) => m.role === "assistant" && m.runId && last.set(m.runId, i));
+  msgs.forEach((m, i) => {
+    if (m.role !== "assistant" || !m.runId) return out.push(m);
+    if (last.get(m.runId) !== i) return (held.get(m.runId) || held.set(m.runId, []).get(m.runId)).push(m);
+    if (held.has(m.runId)) out.push({ fold: held.get(m.runId), runId: m.runId });
+    out.push(m);
+  });
+  return out;
+}
+const PICK = "Pick a thread in the Threads view to see its chat here.";
+// pend: the optimistic user bubble, kept after the real messages until a poll brings the real one.
+// opened: runIds whose fold the user expanded; kept across polls.
+let shown = [], count = 0, thread = "", pend = null, opened = new Set();
 function node(m, pending) {
   const n = el("div", "m " + m.role + (pending ? " pending" : ""));
   n._t = m.text || "";
-  n.append(el("div", "r", m.role === "user" ? "You" : "Assistant"), body(n._t));
+  n.setAttribute("aria-label", m.role === "user" ? "You" : "Assistant");
+  n.append(body(n._t));
   return n;
 }
+// The folded messages are only built when first expanded.
+function foldNode(f) {
+  const k = f.fold.length;
+  const n = el("div", "fold"), b = el("button", "ft", `${k} earlier update${k > 1 ? "s" : ""}`), inner = el("div", "fb");
+  n._t = f.fold.map((m) => m.text || "").join("\n");
+  const set = (on) => {
+    if (on && !inner.children.length) inner.append(...f.fold.map((m) => node(m)));
+    inner.hidden = !on;
+    n.classList.toggle("open", on);
+    b.setAttribute("aria-expanded", String(on));
+    on ? opened.add(f.runId) : opened.delete(f.runId);
+  };
+  b.onclick = () => set(inner.hidden);
+  n.append(b, inner);
+  set(opened.has(f.runId));
+  return n;
+}
+// Placeholders use the hidden attribute, so they stay correct even with a stale stylesheet.
+function mode(m) {
+  emptyEl.hidden = m !== "empty";
+  skel.hidden = m !== "loading";
+}
+function switchTo(id) {
+  if (id === thread) return;
+  thread = id;
+  shown = [];
+  count = 0;
+  pend = null;
+  opened = new Set();
+  log.replaceChildren();
+}
+function header(d) {
+  st.className = "";
+  st.dataset.s = d.status || "";
+  st.textContent = d.status || "";
+  modelEl.textContent = d.modelName || d.model || "";
+  modelEl.title = d.model || "";
+  work.hidden = d.status !== "running";
+}
 function render(d) {
-  if (d.threadId !== thread) { thread = d.threadId; shown = []; log.replaceChildren(); }
+  switchTo(d.threadId);
+  if (pend) pend.node.remove();
   const bottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 40;
-  d.messages.forEach((m, i) => {
-    const key = m.role + "\u0001" + m.text;
+  const items = collapse(d.messages);
+  items.forEach((m, i) => {
+    const key = m.fold ? "fold\u0001" + m.runId + "\u0001" + m.fold.length : m.role + "\u0001" + m.text;
     if (shown[i] === key) return;
-    const n = node(m);
+    const n = m.fold ? foldNode(m) : node(m);
     if (log.children[i]) log.replaceChild(n, log.children[i]);
     else log.append(n);
     shown[i] = key;
   });
-  while (log.children.length > d.messages.length) log.lastChild.remove();
-  shown.length = d.messages.length;
-  st.className = "";
-  st.textContent = d.status;
-  modelEl.textContent = prettyModel(d.model);
-  modelEl.title = d.model || "";
-  work.classList.toggle("on", d.status === "running");
+  while (log.children.length > items.length) log.lastChild.remove();
+  shown.length = items.length;
+  if (pend && d.messages.slice(pend.after).some((m) => m.role === "user")) pend = null;
+  count = d.messages.length;
+  if (pend) log.append(pend.node);
+  if (!log.children.length) emptyTxt.textContent = "No messages yet. Write the first one below.";
+  mode(log.children.length ? "" : "empty");
+  header(d);
   if (bottom || d.jump) log.scrollTop = log.scrollHeight;
 }
 
@@ -168,14 +231,28 @@ function lock(on) {
   t.disabled = on;
   btn.disabled = on;
 }
+// The bubble shows at once; the text stays in the (locked) box until the extension confirms with {sent}.
 function send() {
   const x = t.value.trim();
   if (!x || btn.disabled) return;
   lock(true);
+  if (thread) {
+    pend = { node: node({ role: "user", text: x }, true), after: count };
+    log.append(pend.node);
+    mode("");
+    log.scrollTop = log.scrollHeight;
+  }
   vs.postMessage({ text: x });
 }
 // Links never navigate the webview: the extension opens files in an editor and web links in the browser.
 log.addEventListener("click", (e) => {
+  const c = e.target.closest && e.target.closest("button.copy");
+  if (c) {
+    vs.postMessage({ copy: c.closest(".code").querySelector("code").textContent });
+    c.textContent = "Copied";
+    setTimeout(() => (c.textContent = "Copy"), 1200);
+    return;
+  }
   const a = e.target.closest && e.target.closest("a[data-file],a[data-url]");
   if (!a) return;
   e.preventDefault();
@@ -192,17 +269,25 @@ t.onkeydown = (e) => {
 
 addEventListener("message", (e) => {
   const d = e.data;
-  if (d.error) { st.className = "err"; st.textContent = "error: " + d.error; return; }
-  if (d.empty) { st.className = ""; st.textContent = "Click a thread above to show its chat."; return; }
+  if (d.error) { st.className = "err"; st.textContent = "error: " + d.error; if (!skel.hidden) mode(""); return; }
+  if (d.empty) { switchTo(""); emptyTxt.textContent = PICK; mode("empty"); st.textContent = ""; modelEl.textContent = ""; work.hidden = true; return; }
+  if (d.loading) { switchTo(d.threadId); mode(log.children.length ? "" : "loading"); header(d); return; }
   if (d.sent) {
-    log.append(node({ role: "user", text: t.value.trim() }, true)); // shown until the next poll brings the real one
-    log.scrollTop = log.scrollHeight;
+    if (pend) pend.node.classList.remove("pending");
     t.value = "";
     grow();
     lock(false);
     t.focus();
     return;
   }
-  if (d.sendError) { lock(false); st.className = "err"; st.textContent = "not sent: " + d.sendError; return; }
+  if (d.sendError) {
+    if (pend) { pend.node.remove(); pend = null; }
+    if (!log.children.length) mode("empty");
+    lock(false);
+    t.focus();
+    st.className = "err";
+    st.textContent = "not sent: " + d.sendError;
+    return;
+  }
   if (d.messages) render(d);
 });

@@ -38,12 +38,25 @@ function buildPrompt(editor) {
   return `${head}\n\n${fence}${code}\n\`\`\`${tail}\n\n`;
 }
 
+// "T3 Code" output channel, created on first use.
+let channel;
+function log(msg) {
+  if (!channel) channel = vscode.window.createOutputChannel("T3 Code");
+  channel.appendLine(new Date().toISOString().slice(11, 19) + " " + msg);
+}
+
 // openExternal re-encodes the query (%23 -> %2523) and thread ids (%3A), so on a
 // local Linux window hand the raw URL to xdg-open instead.
 // ponytail: macOS/Windows/remote still use openExternal and may double-encode; fix when needed.
 async function openLink(url) {
   if (process.platform === "linux" && !vscode.env.remoteName) {
-    execFile("xdg-open", [url], (err) => {
+    // The extension host runs with ELECTRON_RUN_AS_NODE=1. Inherited, it makes the T3 Code app
+    // (also Electron) start as plain Node and crash on the URL, while xdg-open still exits 0.
+    // Drop every ELECTRON_* var (also ELECTRON_NO_ASAR, which would stop the app loading its app.asar).
+    const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("ELECTRON_")));
+    log("xdg-open " + url);
+    execFile("xdg-open", [url], { env }, (err, out, stderr) => {
+      if (stderr) log("xdg-open stderr: " + stderr.trim());
       if (err) vscode.window.showErrorMessage("T3 Code: xdg-open failed: " + err.message);
     });
     return;
@@ -83,13 +96,41 @@ async function listThreads() {
   return list.filter((t) => !t.settled && !t.snoozed);
 }
 
+// "claude-opus-5-5" -> "Opus 5.5"; anything else is shown as is.
+function prettyModel(id) {
+  const m = /^claude-([a-z]+)-(\d+)-(\d+)/.exec(id || "");
+  return m ? m[1][0].toUpperCase() + m[1].slice(1) + " " + m[2] + "." + m[3] : id || "";
+}
+
+// ISO time -> "now", "5m ago", "3h ago", "2d ago", ...; "" for a missing or bad date.
+function ago(iso, now = Date.now()) {
+  const s = (now - Date.parse(iso)) / 1000;
+  if (!(s >= -60)) return ""; // NaN, or clearly in the future
+  if (s < 60) return "now";
+  for (const [n, u] of [[31536000, "y"], [2592000, "mo"], [604800, "w"], [86400, "d"], [3600, "h"], [60, "m"]])
+    if (s >= n) return Math.floor(s / n) + u + " ago";
+}
+
+// Status -> [codicon, theme color]. Anything unknown falls back to a plain chat icon.
+const STATUS_ICON = {
+  running: ["loading~spin", "charts.blue"],
+  waiting: ["bell", "charts.yellow"],
+  completed: ["check", undefined],
+  failed: ["error", "errorForeground"],
+  error: ["error", "errorForeground"],
+  interrupted: ["debug-pause", "charts.orange"],
+};
+
 class Threads {
   constructor() {
     this._emitter = new vscode.EventEmitter();
     this.kids = new Map();
     this.onDidChangeTreeData = this._emitter.event;
   }
-  refresh() {
+  // soft: re-render from the last list (fresh "3m ago") without calling the CLI.
+  // A pending hard refresh stays hard even if a soft one fires before it runs.
+  refresh(soft) {
+    if (soft !== true) this.hard = true;
     this._emitter.fire();
   }
   getTreeItem(item) {
@@ -103,13 +144,25 @@ class Threads {
     );
     item.id = t.threadId;
     item.thread = t;
-    item.description = [t.status, t.model, kids && `${kids.length} agent${kids.length > 1 ? "s" : ""}`].filter(Boolean).join(", ");
-    item.tooltip = [t.title || t.threadId, `status: ${t.status}`, t.model && `model: ${t.model}`, t.relationshipToParent]
-      .filter(Boolean)
-      .join("\n");
+    const bg = (t.pendingBackgroundTasks || []).length;
+    const when = ago(t.updatedAt);
+    item.description = [
+      prettyModel(t.model),
+      when,
+      kids && `${kids.length} agent${kids.length > 1 ? "s" : ""}`,
+    ].filter(Boolean).join("  |  ");
+    // appendText escapes markdown, so titles and task names render literally.
+    const tip = new vscode.MarkdownString();
+    tip.appendMarkdown("**").appendText(t.title || t.threadId).appendMarkdown("**\n\n");
+    tip.appendText([t.status, prettyModel(t.model), when && "updated " + when].filter(Boolean).join("  |  "));
+    if (t.relationshipToParent) tip.appendMarkdown("\n\n").appendText(t.relationshipToParent);
+    if (bg) tip.appendMarkdown("\n\n").appendText(`Waiting on ${bg} background task${bg > 1 ? "s" : ""}:`);
+    for (const k of t.pendingBackgroundTasks || []) tip.appendMarkdown("\n- ").appendText(k.description || k.kind || "task");
+    item.tooltip = tip;
+    item.accessibilityInformation = { label: `${t.title || t.threadId}, ${t.status}${when ? ", " + when : ""}` };
     item.contextValue = "thread";
-    const icon = t.status === "running" ? "sync~spin" : t.status === "waiting" ? "bell" : t.pinned ? "pin" : "comment";
-    item.iconPath = new vscode.ThemeIcon(icon);
+    const [icon, color] = STATUS_ICON[t.status] || [t.pinned ? "pin" : "comment-discussion"];
+    item.iconPath = new vscode.ThemeIcon(icon, color && new vscode.ThemeColor(color));
     item.command = { command: "t3code.openChat", title: "Open chat", arguments: [t] };
     return item;
   }
@@ -117,7 +170,10 @@ class Threads {
   async getChildren(element) {
     if (element) return (this.kids.get(element.thread.threadId) || []).map((t) => this.item(t));
     try {
-      const list = await listThreads();
+      const hard = this.hard || !this.list;
+      this.hard = false;
+      const list = hard ? await listThreads() : this.list;
+      this.list = list;
       const ids = new Set(list.map((t) => t.threadId));
       this.kids = new Map();
       for (const t of list) {
@@ -127,6 +183,7 @@ class Threads {
       }
       return list.filter((t) => !t.parentThreadId || !ids.has(t.parentThreadId)).map((t) => this.item(t));
     } catch (e) {
+      this.list = undefined; // never show a stale list under an error
       const item = new vscode.TreeItem(e.message.split("\n")[0]);
       item.iconPath = new vscode.ThemeIcon("error");
       item.tooltip = e.message;
@@ -150,7 +207,10 @@ async function sendSelection() {
 }
 
 function openThread(t) {
-  if (!t || !t.link) return;
+  if (!t || !t.link) {
+    log("open in app: no thread link (" + JSON.stringify(t && t.threadId) + ")");
+    return vscode.window.showWarningMessage("T3 Code: this thread has no app link.");
+  }
   // Never re-encode: the thread id inside the link is already encoded.
   openLink(t.link.startsWith(WEB_PREFIX) ? t.link.replace(WEB_PREFIX, "t3code://") : t.link);
 }
@@ -166,6 +226,7 @@ class Chat {
     this.last = "";
     this.fastUntil = 0;
     this.status = "";
+    this.cache = new Map(); // threadId -> last payload posted, so switching back paints instantly
     // Each `t3 thread show` costs ~1s of CPU: poll fast only while a turn runs or just after open/send.
     this.loop = async () => {
       clearTimeout(this.timer); // one timer chain only, even if hurry() rescheduled meanwhile
@@ -189,23 +250,26 @@ class Chat {
     const media = vscode.Uri.joinPath(this.extensionUri, "media");
     view.webview.options = { enableScripts: true, localResourceRoots: [media] };
     view.webview.html = chatHtml(view.webview, media);
+    this.last = ""; // a fresh webview has nothing painted yet
     view.webview.onDidReceiveMessage(async (m) => {
       if (m.open) return openFileLink(m.open);
       if (m.url) return /^https?:\/\//.test(m.url) && vscode.env.openExternal(vscode.Uri.parse(m.url));
+      if (typeof m.copy === "string") return vscode.env.clipboard.writeText(m.copy);
+      if (typeof m.text !== "string" || !m.text.trim()) return; // only an explicit composer send reaches `t3 thread send`
       // The webview keeps the typed text until it gets {sent}, so a failed send loses nothing.
       if (!this.thread) return view.webview.postMessage({ sendError: "click a thread first" });
       try {
         await t3(["thread", "send", this.thread.threadId, "-"], m.text);
         view.webview.postMessage({ sent: true });
         this.hurry();
-        this.poll(true);
+        this.poll(true, true);
       } catch (e) {
         view.webview.postMessage({ sendError: e.message.split("\n")[0] });
       }
     });
     view.onDidChangeVisibility(() => this.poll(true));
     view.onDidDispose(() => (this.view = undefined));
-    if (this.thread) this.poll(true);
+    if (this.thread) this.paint(this.thread);
     else this.restore();
   }
   // Reopen the last thread of this workspace if it is still open (not settled/snoozed),
@@ -230,9 +294,17 @@ class Chat {
     if (!this.view || !this.view.visible) await vscode.commands.executeCommand("t3code.chat.focus");
     if (this.view) this.view.description = t.title || t.threadId;
     this.hurry();
-    this.poll(true);
+    this.paint(t);
   }
-  async poll(force) {
+  // Paint the cached chat (or a light loading state) right away, then fetch the fresh one.
+  paint(t) {
+    const c = this.cache.get(t.threadId);
+    if (this.view) this.view.webview.postMessage(c ? { ...c, jump: true } : { loading: true, threadId: t.threadId, status: t.status, model: t.model, modelName: prettyModel(t.model) });
+    this.last = c ? JSON.stringify([t.threadId, c.status, c.messages]) : "";
+    this.poll(true, !c);
+  }
+  // force: run even if a poll is in flight; jump: scroll to the bottom after painting.
+  async poll(force, jump) {
     const v = this.view;
     if (!v || !v.visible) return;
     if (!this.thread) return v.webview.postMessage({ empty: true });
@@ -246,15 +318,19 @@ class Chat {
       if (this.status && this.status !== out.thread.status && this.onStatus) this.onStatus(); // refresh tree icons
       this.status = out.thread.status;
       const s = JSON.stringify([id, out.thread.status, out.messages]);
-      if (force || s !== this.last) {
+      if (s !== this.last || jump) {
         this.last = s;
-        v.webview.postMessage({
+        const msg = {
           threadId: id,
           status: out.thread.status,
           model: out.thread.model,
+          modelName: prettyModel(out.thread.model),
           messages: out.messages,
-          jump: !!force,
-        });
+        };
+        this.cache.delete(id); // re-insert so the Map keeps the most recent threads last
+        this.cache.set(id, msg);
+        if (this.cache.size > 8) this.cache.delete(this.cache.keys().next().value);
+        v.webview.postMessage({ ...msg, jump: !!jump });
       }
     } catch (e) {
       this.last = ""; // so the next good poll repaints and clears the error
@@ -301,15 +377,21 @@ async function openFileLink(raw) {
 // Strict CSP: only our own script (by nonce) and stylesheet load; nothing else, no inline code.
 function chatHtml(webview, media) {
   const nonce = require("crypto").randomBytes(16).toString("hex");
-  const css = webview.asWebviewUri(vscode.Uri.joinPath(media, "chat.css"));
-  const js = webview.asWebviewUri(vscode.Uri.joinPath(media, "chat.js"));
+  // ?v=nonce: a reloaded extension never pairs a new shell with a cached old chat.css/chat.js.
+  const css = webview.asWebviewUri(vscode.Uri.joinPath(media, "chat.css")).with({ query: "v=" + nonce });
+  const js = webview.asWebviewUri(vscode.Uri.joinPath(media, "chat.js")).with({ query: "v=" + nonce });
   return `<!doctype html><html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
 <link rel="stylesheet" href="${css}"></head><body>
 <div id="st" role="status"></div>
+<div id="main">
 <div id="log" role="log" aria-live="polite"></div>
-<div id="work">Assistant is working</div>
-<div id="bar"><span id="model" title="Model of this thread"></span><textarea id="t" rows="1" aria-label="Message" placeholder="Message (Enter to send, Shift+Enter for a new line)"></textarea><button id="b">Send</button></div>
+<div id="empty" hidden><div class="logo"></div><div id="emptytxt">Pick a thread in the Threads view to see its chat here.</div></div>
+<div id="skel" aria-hidden="true"><i></i><i></i><i></i></div>
+<div id="work" hidden><i></i><i></i><i></i><span>Working</span></div>
+</div>
+<div id="bar"><textarea id="t" rows="1" aria-label="Message" placeholder="Message the agent"></textarea>
+<div id="row"><span id="model" title="Model of this thread"></span><button id="b" title="Send (Enter)">Send</button></div></div>
 <script nonce="${nonce}" src="${js}"></script></body></html>`;
 }
 
@@ -347,6 +429,8 @@ function activate(context) {
   context.subscriptions.push(chat);
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider("t3code.threads", provider),
+    // Keep "3m ago" honest without calling the CLI: re-render the cached list once a minute.
+    { dispose: clearInterval.bind(null, setInterval(() => provider.refresh(true), 60000)) },
     vscode.commands.registerCommand("t3code.sendSelection", sendSelection),
     vscode.commands.registerCommand("t3code.refresh", () => provider.refresh()),
     vscode.commands.registerCommand("t3code.openThread", (arg) => openThread(arg && arg.thread ? arg.thread : arg)),
@@ -358,4 +442,4 @@ function activate(context) {
   );
 }
 
-module.exports = { activate };
+module.exports = { activate, ago, prettyModel };

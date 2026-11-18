@@ -1,4 +1,4 @@
-// Self-check for media/chat.js: markdown output, HTML escaping, and T3 citation cards.
+// Self-check for media/chat.js (markdown, HTML escaping, T3 citation cards) and the pure helpers of extension.js.
 // Run: node test/chat_check.js
 const fs = require("fs"), vm = require("vm"), path = require("path"), assert = require("assert");
 
@@ -8,6 +8,7 @@ class N {
     this.classList = { toggle() {}, add() {}, remove() {}, contains: () => false };
   }
   append(...k) { this.kids.push(...k); }
+  setAttribute(k, v) { this[k] = v; }
   addEventListener() {}
   replaceChildren() { this.kids = []; }
   get children() { return this.kids; }
@@ -18,11 +19,31 @@ const ctx = {
   addEventListener() {}, setTimeout, URLSearchParams,
 };
 vm.createContext(ctx);
-vm.runInContext(fs.readFileSync(path.join(__dirname, "../media/chat.js"), "utf8") + "\n;this.md=md;this.body=body;this.prettyModel=prettyModel;", ctx);
-const { md, body, prettyModel } = ctx;
+vm.runInContext(fs.readFileSync(path.join(__dirname, "../media/chat.js"), "utf8") + "\n;this.md=md;this.body=body;this.collapse=collapse;", ctx);
+const { md, body, collapse } = ctx;
+
+// extension.js only touches `vscode` inside functions, so an empty stub is enough to load it.
+const Module = require("module"), load = Module._load;
+Module._load = (req, ...a) => (req === "vscode" ? {} : load(req, ...a));
+const { prettyModel, ago } = require("../extension.js");
+Module._load = load;
 
 assert.strictEqual(prettyModel("claude-opus-5-5"), "Opus 5.5");
 assert.strictEqual(prettyModel("gpt-5.4"), "gpt-5.4");
+assert.strictEqual(prettyModel(undefined), "");
+
+const now = Date.parse("2026-11-18T12:00:00Z");
+const before = (s) => new Date(now - s * 1000).toISOString();
+assert.strictEqual(ago(before(5), now), "now");
+assert.strictEqual(ago(before(-10), now), "now"); // small clock skew
+assert.strictEqual(ago(before(59), now), "now");
+assert.strictEqual(ago(before(60), now), "1m ago");
+assert.strictEqual(ago(before(3 * 3600 + 59), now), "3h ago");
+assert.strictEqual(ago(before(2 * 86400), now), "2d ago");
+assert.strictEqual(ago(before(15 * 86400), now), "2w ago");
+assert.strictEqual(ago(before(400 * 86400), now), "1y ago");
+assert.strictEqual(ago(undefined, now), "");
+assert.strictEqual(ago("garbage", now), "");
 
 // Escaping: no raw tag survives; only http(s) links become anchors.
 const x = md("<script>alert(1)</script> **b** `<i>` [ok](https://a.b/c?d=1&e=2) [bad](javascript:alert(1))");
@@ -41,8 +62,13 @@ assert(x.includes("<strong>b</strong>") && x.includes("<code>&lt;i&gt;</code>"))
 // Block structure.
 assert.strictEqual(
   md("# T\n- a\n- b\n\n1. x\n\n```js\nif (a<b) {}\n```\ntext"),
-  "<h1>T</h1><ul><li>a</li><li>b</li></ul><ol><li>x</li></ol><pre><code>if (a&lt;b) {}</code></pre><p>text</p>"
+  "<h1>T</h1><ul><li>a</li><li>b</li></ul><ol><li>x</li></ol>" +
+    '<div class="code"><div class="ch"><span>js</span><button class="copy">Copy</button></div>' +
+    "<pre><code>if (a&lt;b) {}</code></pre></div><p>text</p>"
 );
+// A fence without a language is labelled "text"; a hostile language tag cannot inject markup.
+assert(md("```\nx\n```").includes("<span>text</span>"));
+assert(!md('```"><img src=x>\nx\n```').includes("<img"), "fence language injection");
 
 // Citation and image link forms as T3 sends them.
 const cite =
@@ -56,5 +82,20 @@ assert(!b.kids.some((k) => (k.innerHTML || "").includes("t3-citation")), "raw ci
 
 const img = body("look\n![shot.png](t3-context://v1/image/image_1)");
 assert(img.kids.some((k) => k.className === "chip" && k.textContent === "image: shot.png"));
+
+// Run grouping: each run keeps its user message(s) and only its last assistant message;
+// the earlier assistant messages of that run fold into one item placed just before it.
+const u = (r, x) => ({ role: "user", runId: r, text: x }), a = (r, x) => ({ role: "assistant", runId: r, text: x });
+const shape = (items) => JSON.parse(JSON.stringify(items)).map((m) => (m.fold ? "fold:" + m.fold.map((f) => f.text).join(",") : m.text));
+assert.deepStrictEqual(
+  shape(collapse([u("r1", "q1"), a("r1", "a1"), a("r1", "a2"), a("r1", "a3"), u("r2", "q2"), a("r2", "b1")])),
+  ["q1", "fold:a1,a2", "a3", "q2", "b1"]
+);
+// A running run shows only its latest assistant message; messages without a runId never fold.
+assert.deepStrictEqual(shape(collapse([u("r1", "q"), a("r1", "x"), a("r1", "y")])), ["q", "fold:x", "y"]);
+assert.deepStrictEqual(shape(collapse([a(undefined, "s"), a(undefined, "t")])), ["s", "t"]);
+assert.deepStrictEqual(shape(collapse([])), []);
+// A user message sent mid-run stays in place; the fold still sits right before the run's last reply.
+assert.deepStrictEqual(shape(collapse([u("r", "q"), a("r", "x"), u("r", "more"), a("r", "y")])), ["q", "more", "fold:x", "y"]);
 
 console.log("chat_check ok");
