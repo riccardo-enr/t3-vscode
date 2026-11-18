@@ -6,6 +6,10 @@
   "publisher": "local",
   "engines": { "vscode": "^1.85.0" },
   "main": "./extension.js",
+  "extensionKind": ["workspace"],
+  "capabilities": {
+    "untrustedWorkspaces": { "supported": false, "description": "Runs the t3 CLI and git in the workspace." }
+  },
   "activationEvents": [],
   "contributes": {
     "commands": [
