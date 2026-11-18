@@ -661,15 +661,15 @@ function openUsage(context) {
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${w.cspSource}; script-src 'nonce-${nonce}';">
 <link rel="stylesheet" href="${uri("usage.css")}"></head><body>
 <header><h1>Usage</h1>
-<select id="prov" aria-label="Provider"><option value="all">All providers</option></select>
-<div class="seg" id="tabs"><input type="radio" name="t" id="tcost" value="cost" checked><label for="tcost">Cost</label><input type="radio" name="t" id="ttokens" value="tokens"><label for="ttokens">Tokens</label><input type="radio" name="t" id="tlimits" value="limits"><label for="tlimits">Limits</label></div>
-<div class="seg" id="range"><input type="radio" name="r" id="r7" checked><label for="r7">7 days</label><input type="radio" name="r" id="r30"><label for="r30">30 days</label></div>
+<select id="prov" hidden aria-label="Provider"><option value="all">All providers</option></select>
+<div class="seg" id="tabs"><input type="radio" name="t" id="tcost" value="cost"><label for="tcost">Cost</label><input type="radio" name="t" id="ttokens" value="tokens"><label for="ttokens">Tokens</label><input type="radio" name="t" id="tlimits" value="limits" checked><label for="tlimits">Limits</label></div>
+<div class="seg" id="range" hidden><input type="radio" name="r" id="r7" checked><label for="r7">7 days</label><input type="radio" name="r" id="r30"><label for="r30">30 days</label></div>
 <button id="refresh">Refresh</button></header>
 <div id="st" role="status"></div>
-<div id="usage"><div id="tiles"></div><div id="chart" role="img" aria-label="Per day"></div>
+<div id="usage" hidden><div id="tiles"></div><div id="chart" role="img" aria-label="Per day"></div>
 <table><thead><tr><th>Model</th><th>Provider</th><th class="n" id="mh">Cost</th></tr></thead><tbody id="rows"></tbody></table>
 <div id="note"></div></div>
-<div id="limits" hidden></div>
+<div id="limits"></div>
 <script nonce="${nonce}" src="${uri("usage.js")}"></script></body></html>`;
   let seq = 0; // a slow 30-day scan must not overwrite a newer 7-day answer
   const load = async (days) => {
