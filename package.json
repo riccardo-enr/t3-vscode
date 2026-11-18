@@ -23,7 +23,8 @@
       { "command": "t3code.chatRefresh", "title": "T3 Code: Refresh chat", "icon": "$(refresh)" },
       { "command": "t3code.chatOpenInApp", "title": "T3 Code: Open chat thread in T3 Code app", "icon": "$(link-external)" },
       { "command": "t3code.showTurnChanges", "title": "T3 Code: Show changes of last turn", "icon": "$(diff)" },
-      { "command": "t3code.openWorktree", "title": "T3 Code: Open worktree in Source Control", "icon": "$(source-control)" }
+      { "command": "t3code.openWorktree", "title": "T3 Code: Open worktree in Source Control", "icon": "$(source-control)" },
+      { "command": "t3code.askFix", "title": "T3 Code: Ask T3 to fix" }
     ],
     "viewsContainers": {
       "activitybar": [{ "id": "t3code", "title": "T3 Code", "icon": "icon.svg" }]
@@ -44,7 +45,8 @@
       "commandPalette": [
         { "command": "t3code.openThread", "when": "false" },
         { "command": "t3code.openChat", "when": "false" },
-        { "command": "t3code.openWorktree", "when": "t3code.chatWorktree" }
+        { "command": "t3code.openWorktree", "when": "t3code.chatWorktree" },
+        { "command": "t3code.askFix", "when": "false" }
       ],
       "view/title": [
         { "command": "t3code.newThread", "when": "view == t3code.threads", "group": "navigation@1" },

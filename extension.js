@@ -351,6 +351,25 @@ async function sendSelection() {
   await openLink(url);
 }
 
+// Quick fix on diagnostics: select the whole lines they cover, then run the draft flow (nothing is sent).
+const askFixProvider = {
+  provideCodeActions(doc, range, ctx) {
+    if (!ctx.diagnostics.length) return;
+    const a = new vscode.CodeAction("Ask T3 to fix", vscode.CodeActionKind.QuickFix);
+    a.diagnostics = ctx.diagnostics;
+    const r = ctx.diagnostics.map((d) => d.range).reduce((x, y) => x.union(y));
+    a.command = { command: "t3code.askFix", title: "Ask T3 to fix", arguments: [doc.uri, r] };
+    return [a];
+  },
+};
+async function askFix(uri, r) {
+  const editor = await vscode.window.showTextDocument(uri);
+  // Diagnostic ranges can be zero-width; whole lines also give the agent context.
+  const end = editor.document.lineAt(r.end.line).range.end;
+  editor.selection = new vscode.Selection(r.start.line, 0, end.line, end.character);
+  return sendSelection();
+}
+
 function openThread(t) {
   if (!t || !t.link) {
     log("open in app: no thread link (" + JSON.stringify(t && t.threadId) + ")");
@@ -706,6 +725,10 @@ function activate(context) {
     // Keep "3m ago" honest without calling the CLI: re-render the cached list once a minute.
     { dispose: clearInterval.bind(null, setInterval(() => provider.refresh(true), 60000)) },
     vscode.commands.registerCommand("t3code.sendSelection", sendSelection),
+    vscode.commands.registerCommand("t3code.askFix", askFix),
+    vscode.languages.registerCodeActionsProvider({ scheme: "file" }, askFixProvider, {
+      providedCodeActionKinds: [vscode.CodeActionKind.QuickFix],
+    }),
     vscode.commands.registerCommand("t3code.refresh", () => provider.refresh()),
     vscode.commands.registerCommand("t3code.openThread", (arg) => openThread(arg && arg.thread ? arg.thread : arg)),
     vscode.window.registerWebviewViewProvider("t3code.chat", chat, { webviewOptions: { retainContextWhenHidden: true } }),
