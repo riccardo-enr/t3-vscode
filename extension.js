@@ -39,6 +39,25 @@ function buildPrompt(editor) {
   return `${head}\n\n${fence}${code}\n\`\`\`${tail}\n\n`;
 }
 
+// Composer context: 1-based [start, end] of a selection, or undefined when it is empty.
+// A selection ending at column 0 of a later line does not include that line.
+function selLines(sel) {
+  if (!sel || sel.isEmpty) return undefined;
+  const end = sel.end.line + (sel.end.character === 0 && sel.end.line > sel.start.line ? 0 : 1);
+  return [sel.start.line + 1, end];
+}
+// c = { abs, rel, lines }: the chip label and the line appended to a sent message.
+function ctxLabel(c) {
+  const l = c.lines;
+  return c.rel + (!l ? "" : l[0] === l[1] ? ":" + l[0] : `:${l[0]}-${l[1]}`);
+}
+function ctxRef(c) {
+  const tag = c.lines ? "selected" : "open file";
+  // A markdown link renders compactly in the chat; paths md() cannot link stay plain.
+  if (/[\s()[\]]/.test(c.abs)) return `Context: ${c.abs}${ctxLabel(c).slice(c.rel.length)} (${tag})`;
+  return `Context: [${ctxLabel(c)}](${c.abs}${c.lines ? ":" + c.lines[0] : ""}) (${tag})`;
+}
+
 // "T3 Code" output channel, created on first use.
 let channel;
 function log(msg) {
@@ -448,7 +467,9 @@ class Chat {
       // The webview keeps the typed text until it gets {sent}, so a failed send loses nothing.
       if (!this.thread) return view.webview.postMessage({ sendError: "click a thread first" });
       try {
-        await t3(["thread", "send", this.thread.threadId, "-"], m.text);
+        // The reference is built here from the tracked editor, never from webview input.
+        const text = m.ctx === true && this.ctx ? m.text + "\n\n" + ctxRef(this.ctx) : m.text;
+        await t3(["thread", "send", this.thread.threadId, "-"], text);
         view.webview.postMessage({ sent: true });
         this.hurry();
         this.poll(true, true);
@@ -456,10 +477,20 @@ class Chat {
         view.webview.postMessage({ sendError: e.message.split("\n")[0] });
       }
     });
+    if (this.ctx) view.webview.postMessage({ ctx: ctxLabel(this.ctx) });
     view.onDidChangeVisibility(() => this.poll(true));
     view.onDidDispose(() => (this.view = undefined));
     if (this.thread) this.paint(this.thread);
     else this.restore();
+  }
+  // Track the active file editor for the composer chip. Other editors (output, git:, untitled)
+  // and focus moving to the webview keep the last file context.
+  setContext(editor) {
+    const uri = editor && editor.document.uri;
+    if (!uri || uri.scheme !== "file") return;
+    const rel = vscode.workspace.getWorkspaceFolder(uri) ? vscode.workspace.asRelativePath(uri) : uri.fsPath;
+    this.ctx = { abs: uri.fsPath, rel, lines: selLines(editor.selection) };
+    if (this.view) this.view.webview.postMessage({ ctx: ctxLabel(this.ctx) });
   }
   // worktreePath comes only from `t3 thread show` (not `thread list`); it drives the title-bar button.
   setWorktree(p) {
@@ -595,7 +626,7 @@ function chatHtml(webview, media) {
 <div id="work" hidden><i></i><i></i><i></i><span>Working</span></div>
 </div>
 <div id="bar"><textarea id="t" rows="1" aria-label="Message" placeholder="Message the agent"></textarea>
-<div id="row"><span id="model" role="button" tabindex="0" title="Model of this thread. Click to change model or effort in the T3 Code app"></span><button id="b" title="Send (Enter)">Send</button></div></div>
+<div id="row"><span id="model" role="button" tabindex="0" title="Model of this thread. Click to change model or effort in the T3 Code app"></span><button id="ctx" hidden><span id="ctxl"></span><span aria-hidden="true">x</span></button><button id="b" title="Send (Enter)">Send</button></div></div>
 <script nonce="${nonce}" src="${js}"></script></body></html>`;
 }
 
@@ -749,6 +780,17 @@ function activate(context) {
   context.subscriptions.push(vscode.window.registerFileDecorationProvider(badges));
   context.subscriptions.push(chat);
   watchThreads(context, provider, chat);
+  let ctxTimer;
+  const track = () => {
+    clearTimeout(ctxTimer);
+    ctxTimer = setTimeout(() => chat.setContext(vscode.window.activeTextEditor), 150);
+  };
+  track();
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveTextEditor(track),
+    vscode.window.onDidChangeTextEditorSelection(track),
+    { dispose: () => clearTimeout(ctxTimer) }
+  );
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider("t3code.threads", provider),
     // Keep "3m ago" honest without calling the CLI: re-render the cached list once a minute.
@@ -773,4 +815,4 @@ function activate(context) {
   );
 }
 
-module.exports = { activate, ago, prettyModel, stateStamp, checkpointScope, saveImage };
+module.exports = { activate, ago, prettyModel, stateStamp, checkpointScope, saveImage, selLines, ctxLabel, ctxRef };

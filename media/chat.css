@@ -484,6 +484,38 @@ textarea::placeholder {
    display: none
 }
 
+#ctx {
+   display: flex;
+   gap: 6px;
+   min-width: 0;
+   cursor: pointer;
+   font: inherit;
+   font-size: 11px;
+   padding: 0 8px;
+   border-radius: 10px;
+   background: none;
+   color: var(--vscode-descriptionForeground);
+   border: 1px solid var(--vscode-widget-border, var(--vscode-contrastBorder, transparent))
+}
+
+#ctx[hidden] {
+   display: none
+}
+
+#ctxl {
+   overflow: hidden;
+   text-overflow: ellipsis;
+   white-space: nowrap
+}
+
+#ctx.off {
+   opacity: .5
+}
+
+#ctx.off #ctxl {
+   text-decoration: line-through
+}
+
 #b {
    margin-left: auto;
    padding: 3px 12px;

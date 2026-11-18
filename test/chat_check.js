@@ -25,7 +25,7 @@ const { md, body, collapse } = ctx;
 // extension.js only touches `vscode` inside functions, so an empty stub is enough to load it.
 const Module = require("module"), load = Module._load;
 Module._load = (req, ...a) => (req === "vscode" ? {} : load(req, ...a));
-const { prettyModel, ago, stateStamp, checkpointScope, saveImage } = require("../extension.js");
+const { prettyModel, ago, stateStamp, checkpointScope, saveImage, selLines, ctxLabel, ctxRef } = require("../extension.js");
 Module._load = load;
 
 // Pasted images: saved with the right extension and bytes; other types and junk are refused.
@@ -37,6 +37,24 @@ Module._load = load;
   assert.throws(() => saveImage("data:text/html;base64,PGI+", dir));
   assert.throws(() => saveImage("not a data url", dir));
   fs.rmSync(dir, { recursive: true });
+}
+
+// Composer context: selection -> 1-based lines, chip label, and the reference appended on send.
+{
+  const sel = (l0, c0, l1, c1) => ({ isEmpty: l0 === l1 && c0 === c1, start: { line: l0, character: c0 }, end: { line: l1, character: c1 } });
+  assert.strictEqual(selLines(sel(4, 2, 4, 2)), undefined);
+  assert.deepStrictEqual(selLines(sel(119, 0, 139, 5)), [120, 140]);
+  assert.deepStrictEqual(selLines(sel(119, 0, 140, 0)), [120, 140]); // whole-line selection ending at column 0
+  assert.deepStrictEqual(selLines(sel(9, 3, 9, 8)), [10, 10]);
+  const c = { abs: "/w/extension.js", rel: "extension.js", lines: [120, 140] };
+  assert.strictEqual(ctxLabel(c), "extension.js:120-140");
+  assert.strictEqual(ctxLabel({ ...c, lines: [7, 7] }), "extension.js:7");
+  assert.strictEqual(ctxRef(c), "Context: [extension.js:120-140](/w/extension.js:120) (selected)");
+  assert.strictEqual(ctxRef({ ...c, lines: undefined }), "Context: [extension.js](/w/extension.js) (open file)");
+  const sp = { abs: "/w/my dir/a(1).js", rel: "my dir/a(1).js", lines: [3, 4] };
+  assert.strictEqual(ctxRef(sp), "Context: /w/my dir/a(1).js:3-4 (selected)");
+  // The bubble renders the reference as one compact file link.
+  assert(md(ctxRef(c)).includes('<a data-file="/w/extension.js:120">extension.js:120-140</a>'), md(ctxRef(c)));
 }
 
 assert.strictEqual(prettyModel("claude-opus-5-5"), "Opus 5.5");

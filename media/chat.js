@@ -9,6 +9,8 @@ const modelEl = document.getElementById("model");
 const emptyEl = document.getElementById("empty");
 const skel = document.getElementById("skel");
 const emptyTxt = document.getElementById("emptytxt");
+const ctxEl = document.getElementById("ctx");
+const ctxL = document.getElementById("ctxl");
 
 function el(tag, cls, txt) {
   const n = document.createElement(tag);
@@ -242,7 +244,7 @@ function send() {
     mode("");
     log.scrollTop = log.scrollHeight;
   }
-  vs.postMessage({ text: x });
+  vs.postMessage({ text: x, ctx: !ctxEl.hidden && !ctxEl.classList.contains("off") });
 }
 // Links never navigate the webview: the extension opens files in an editor and web links in the browser.
 log.addEventListener("click", (e) => {
@@ -259,6 +261,12 @@ log.addEventListener("click", (e) => {
   vs.postMessage(a.dataset.file ? { open: a.dataset.file } : { url: a.dataset.url });
 });
 btn.onclick = send;
+// The chip (active file and selection) is on by default; a click leaves it out until it changes.
+function ctxOff(off) {
+  ctxEl.classList.toggle("off", off);
+  ctxEl.title = off ? "Not attached. Click to attach to the next message" : "Attached to the next message as a path reference. Click to leave it out";
+}
+ctxEl.onclick = () => ctxOff(!ctxEl.classList.contains("off"));
 modelEl.onclick = () => vs.postMessage({ openInApp: true });
 modelEl.onkeydown = (e) => {
   if (e.key === "Enter" || e.key === " ") {
@@ -296,6 +304,12 @@ addEventListener("message", (e) => {
   if (d.empty) { switchTo(""); emptyTxt.textContent = PICK; mode("empty"); st.textContent = ""; modelEl.textContent = ""; work.hidden = true; return; }
   if (d.loading) { switchTo(d.threadId); mode(log.children.length ? "" : "loading"); header(d); return; }
   if (d.imagePath) return insert(d.imagePath);
+  if (typeof d.ctx === "string") {
+    if (d.ctx !== ctxL.textContent) ctxOff(false);
+    ctxL.textContent = d.ctx;
+    ctxEl.hidden = false;
+    return;
+  }
   if (d.imageError) { st.className = "err"; st.textContent = "image not saved: " + d.imageError; return; }
   if (d.sent) {
     if (pend) pend.node.classList.remove("pending");
