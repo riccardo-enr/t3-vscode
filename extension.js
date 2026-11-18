@@ -165,6 +165,17 @@ class TurnBadges {
   }
 }
 
+// Untested against real worktree threads (none existed when written): guarded for a missing path or git extension.
+async function openWorktree(p) {
+  if (!p) return vscode.window.showWarningMessage("T3 Code: this thread has no worktree.");
+  try {
+    await vscode.commands.executeCommand("git.openRepository", p);
+    await vscode.commands.executeCommand("workbench.view.scm");
+  } catch (e) {
+    vscode.window.showErrorMessage("T3 Code: could not open the worktree " + p + ": " + e.message);
+  }
+}
+
 async function showTurnChanges(t) {
   if (!t || !t.threadId) return vscode.window.showWarningMessage("T3 Code: open a thread first.");
   let c;
@@ -406,6 +417,13 @@ class Chat {
     if (this.thread) this.paint(this.thread);
     else this.restore();
   }
+  // worktreePath comes only from `t3 thread show` (not `thread list`); it drives the title-bar button.
+  setWorktree(p) {
+    p = typeof p === "string" && p ? p : undefined;
+    if (p === this.worktree) return;
+    this.worktree = p;
+    vscode.commands.executeCommand("setContext", "t3code.chatWorktree", !!p);
+  }
   // Reopen the last thread of this workspace if it is still open (not settled/snoozed),
   // else the most recently updated open one. listThreads() already drops settled and snoozed.
   async restore() {
@@ -426,6 +444,7 @@ class Chat {
     this.status = ""; // don't treat the switch itself as a status change
     this.state.update("t3code.lastThread", { threadId: t.threadId, title: t.title, link: t.link });
     if (this.onThread) this.onThread(t);
+    this.setWorktree(undefined); // until the first poll of the new thread says otherwise
     if (!this.view || !this.view.visible) await vscode.commands.executeCommand("t3code.chat.focus");
     if (this.view) this.view.description = t.title || t.threadId;
     this.hurry();
@@ -456,6 +475,7 @@ class Chat {
       this.stampId = id;
       if (this.status && this.status !== out.thread.status && this.onStatus) this.onStatus(); // refresh tree icons
       this.status = out.thread.status;
+      this.setWorktree(out.thread.worktreePath);
       const s = JSON.stringify([id, out.thread.status, out.messages]);
       if (s !== this.last || jump) {
         this.last = s;
@@ -693,6 +713,7 @@ function activate(context) {
     vscode.commands.registerCommand("t3code.chatRefresh", () => chat.poll(true)),
     vscode.commands.registerCommand("t3code.chatOpenInApp", () => openThread(chat.thread)),
     vscode.workspace.registerTextDocumentContentProvider("t3-turn", turnContent),
+    vscode.commands.registerCommand("t3code.openWorktree", () => openWorktree(chat.worktree)),
     vscode.commands.registerCommand("t3code.showTurnChanges", (arg) => showTurnChanges(arg && arg.thread ? arg.thread : chat.thread)),
     vscode.commands.registerCommand("t3code.sendToThread", (arg) => sendToThread(provider, arg)),
     vscode.commands.registerCommand("t3code.newThread", () => newThread(provider, chat)),
