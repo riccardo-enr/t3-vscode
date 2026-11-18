@@ -1,50 +1,69 @@
-# T3 Code Bridge for VS Code
+# T3 Code Bridge &mdash; Your Agent Threads in VS Code
 
-A small VS Code extension that brings [T3 Code](https://t3.codes) threads into the editor. You can read and
-chat with your agent threads in the sidebar, and send code from the editor to a thread.
+> See every T3 Code thread of your workspace, chat with it, and send code to it &mdash; without leaving the editor.
 
-Plain JavaScript, no build step, no dependencies. It talks to T3 Code through the `t3` CLI.
+A small, open-source VS Code extension that talks to [T3 Code](https://t3.codes) through the `t3` CLI. Plain JavaScript, no build step, no dependencies.
 
-## Features
+Agents run in the background, finish while you are reading a diff, or sit waiting for an answer. The T3 Code app shows them, but it is another window. This extension puts the threads, their chat and their file changes next to the code they are about.
 
-- **Threads view** (T3 Code icon in the activity bar)
-  - Lists the open threads of the current workspace. Settled and snoozed threads are hidden.
-  - Child agent threads are nested under the thread that started them.
-  - Icons show status: spinning while running, bell when waiting for you, check when completed,
-    error when failed, pause when interrupted, slash when cancelled.
-  - Each row shows the status and the model.
-  - Right-click a thread to open it in the T3 Code app, send the current selection to it, or show
-    the changes of its last turn.
-- **Status bar**: shows how many threads of the workspace are running (hidden when none). Click it
-  to show the T3 Code view. When a thread finishes (completed, failed, interrupted or cancelled) a
-  notification offers "Open chat", except for the thread already visible in the Chat view.
-- **Chat view** (under Threads)
-  - Click a thread to read its whole history and reply. Enter sends, Shift+Enter adds a new line.
-  - Markdown rendering, code blocks, and citation quote cards with a "jump" link to the quoted reply.
-  - File links and path-like code spans (`src/foo.js:42`) open in a VS Code editor at that line.
-    Web links open in the browser.
-  - A badge shows the thread's model (for example "Opus 5.5"). Click it to open the thread in the
-    T3 Code app, where model and effort are changed (the CLI cannot change them).
-  - A chip next to the model badge shows the active file and selected lines (`extension.js:120-140`).
-    When it is on, sending adds a last line with the file's absolute path and line range (not the
-    code). Click the chip to leave it out; it turns back on when the file or selection changes.
-  - Paste an image (Ctrl+V) to save it under `/tmp/t3-vscode-images/` and insert its path.
-  - Title-bar buttons: refresh, open in the app, show the last turn's changes, and (for threads
-    that run in a git worktree) open that worktree in Source Control.
-- **Last turn changes** (`T3 Code: Show changes of last turn`, see the caveat under Limits)
-  - Opens the files the thread's last turn changed in VS Code's diff editor (multi-file diff on
-    recent VS Code, else a file picker and one diff per file).
-  - Files changed in the open chat thread's last turn get a "T3" badge in the Explorer.
-  - Reopens your last thread when VS Code starts, if that thread is not settled or snoozed.
-- **Editor commands** (right-click a selection)
-  - `T3 Code: Send selection (draft)`: opens a new T3 Code draft with the file path, line range,
-    selected code and any diagnostics. Nothing is sent until you send it in the app.
-  - `T3 Code: Send selection to thread`: pick a thread, add an instruction, and send it.
-    This starts an agent turn right away.
-- **Quick fix**: on any diagnostic (red or yellow squiggle), the light bulb offers `Ask T3 to fix`.
-  It selects the affected lines and opens a T3 Code draft, like `Send selection (draft)`.
+<figure align="center">
+  <img src="media/screenshots/threads-chat.png" alt="The Threads and Chat views" width="360" />
+</figure>
 
-## Keybindings
+# Getting Started
+
+1. **Run T3 Code** &mdash; the desktop app must be running, with your workspace folder added as a project.
+2. **Install the extension** &mdash; see [Install](#install).
+3. **Open the view** &mdash; click the **T3 Code** icon in the activity bar. Your open threads are listed, child agents nested under the thread that started them.
+4. **Click a thread** &mdash; its history opens in the Chat view below. Type to reply.
+
+# Know What Your Agents Are Doing &mdash; Threads and Status
+
+Which agent is running, which one is waiting for you, which one failed? One glance at the sidebar answers it.
+
+- **Live status icons** &mdash; spinning while running, a bell when waiting for you, a check when completed, an error mark when failed, pause when interrupted, a slash when cancelled.
+- **Parents and children** &mdash; child agent threads are nested under the thread that started them. Settled and snoozed threads are hidden.
+- **Status bar** &mdash; how many threads of the workspace are running. Click it to show the view.
+- **Finish notifications** &mdash; when a thread completes, fails, is interrupted or is cancelled, a notification offers **Open chat**.
+- **Right-click a thread** &mdash; open it in the T3 Code app, send the current selection to it, or show the changes of its last turn.
+
+# Talk to It &mdash; Chat View
+
+Read the whole history and reply without switching windows.
+
+- **Enter sends**, Shift+Enter adds a new line.
+- **Markdown and code blocks**, with citation quote cards that jump to the quoted reply.
+- **Links that work** &mdash; file links and path-like code spans (`src/foo.js:42`) open in a VS Code editor at that line. Web links open in the browser.
+- **Open-file chip** &mdash; shows the active file and selected lines (`extension.js:120-140`). When on, a send adds the file's absolute path and line range (not the code). Click the chip to leave it out.
+- **Paste images** &mdash; Ctrl+V saves the image under `/tmp/t3-vscode-images/` and inserts its path.
+- **Model badge** &mdash; click it to open the thread in the app, where model and effort are changed (the CLI cannot change them).
+- **Title-bar buttons** &mdash; refresh, open in the app, show the last turn's changes, and open the worktree in Source Control for threads that run in one.
+
+# Send Code to an Agent &mdash; Editor Commands
+
+Right-click a selection:
+
+- **`T3 Code: Send selection (draft)`** &mdash; opens a new T3 Code draft with the file path, line range, selected code and diagnostics. Nothing is sent until you send it in the app.
+- **`T3 Code: Send selection to thread`** &mdash; pick a thread, add an instruction, and send it. This starts an agent turn right away.
+- **`Ask T3 to fix`** &mdash; on any squiggle, the light bulb selects the affected lines and opens a draft.
+
+# See What Changed &mdash; Last Turn Changes
+
+- **`T3 Code: Show changes of last turn`** &mdash; opens the files the thread's last turn changed in VS Code's diff editor (multi-file diff on recent VS Code, else a file picker).
+- **Explorer badges** &mdash; files changed in the open thread's last turn get a "T3" badge.
+- **Resume** &mdash; reopens your last thread when VS Code starts, unless it is settled or snoozed.
+
+See the caveat under [Limits](#limits).
+
+# Watch the Spend &mdash; Usage Dashboard
+
+Run **`T3 Code: Open usage dashboard`**. It shows cost, tokens and cache savings for 7 or 30 days, a per-day chart, and a per-model table with the provider. Tokens with no known price are noted and left out of the cost.
+
+<figure align="center">
+  <img src="media/screenshots/usage.png" alt="The usage dashboard" width="720" />
+</figure>
+
+# Keybindings
 
 | Keys (macOS: Cmd instead of Ctrl) | Command |
 | --- | --- |
@@ -54,7 +73,7 @@ Plain JavaScript, no build step, no dependencies. It talks to T3 Code through th
 
 Change them in Keyboard Shortcuts (search for "T3 Code").
 
-## Requirements
+# Requirements
 
 - The T3 Code desktop app, running, with the workspace folder added as a T3 Code project.
 - The `t3` CLI on your `PATH`, version 0.1.10 or later (`t3 --version`).
@@ -64,7 +83,7 @@ Change them in Keyboard Shortcuts (search for "T3 Code").
 - Opening links in the app uses `xdg-open` on Linux. On macOS, Windows and remote windows it uses
   VS Code's `openExternal`, which is less tested.
 
-## Install
+# Install
 
 Try it without installing, in an Extension Development Host:
 
@@ -78,7 +97,7 @@ Install it for everyday use by linking it into your extensions folder, then rest
 ln -s $HOME/code/t3-vscode ~/.vscode/extensions/local.t3-vscode
 ```
 
-## How it works
+# How it works
 
 | What | `t3` command |
 | --- | --- |
@@ -100,7 +119,7 @@ Before each timed poll the extension checks the modification time of T3's state 
 good poll, the `t3` call is skipped. Opening a thread, sending, or refreshing always polls. The file
 changes every few seconds while any T3 thread runs, so this saves CPU mainly when T3 is idle.
 
-## Limits
+# Limits
 
 - The sidebar covers the current workspace only (`t3 thread list` is per project, and the CLI has
   no command to list projects).
@@ -113,7 +132,7 @@ changes every few seconds while any T3 thread runs, so this saves CPU mainly whe
   repository. A turn that only chatted shows "changed no files".
 - "Open worktree in Source Control" is untested: no worktree thread existed when it was written.
 
-## Development
+# Development
 
 ```sh
 node --check extension.js && node --check media/chat.js
@@ -130,8 +149,12 @@ Files:
 - [package.json](package.json): views, commands, menus.
 - [test/chat_check.js](test/chat_check.js): self-check for the webview rendering.
 
-## Credits
+# Credits
 
 The activity-bar icon ([icon.svg](icon.svg)) uses the T3 glyphs from the T3 Code logo
 (`assets/prod/logo.svg` in [pingdotgg/t3code](https://github.com/pingdotgg/t3code)), MIT License,
 Copyright (c) 2026 T3 Tools Inc.
+
+# License
+
+[MIT](LICENSE), Copyright (c) 2026 Riccardo Enrico.
