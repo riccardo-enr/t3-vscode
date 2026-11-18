@@ -419,6 +419,7 @@ class Chat {
       if (m.open) return openFileLink(m.open);
       if (m.url) return /^https?:\/\//.test(m.url) && vscode.env.openExternal(vscode.Uri.parse(m.url));
       if (typeof m.copy === "string") return vscode.env.clipboard.writeText(m.copy);
+      if (m.openInApp) return openThread(this.thread); // model and effort can only be changed in the app
       if (typeof m.text !== "string" || !m.text.trim()) return; // only an explicit composer send reaches `t3 thread send`
       // The webview keeps the typed text until it gets {sent}, so a failed send loses nothing.
       if (!this.thread) return view.webview.postMessage({ sendError: "click a thread first" });
@@ -569,7 +570,7 @@ function chatHtml(webview, media) {
 <div id="work" hidden><i></i><i></i><i></i><span>Working</span></div>
 </div>
 <div id="bar"><textarea id="t" rows="1" aria-label="Message" placeholder="Message the agent"></textarea>
-<div id="row"><span id="model" title="Model of this thread"></span><button id="b" title="Send (Enter)">Send</button></div></div>
+<div id="row"><span id="model" role="button" tabindex="0" title="Model of this thread. Click to change model or effort in the T3 Code app"></span><button id="b" title="Send (Enter)">Send</button></div></div>
 <script nonce="${nonce}" src="${js}"></script></body></html>`;
 }
 

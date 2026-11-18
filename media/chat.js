@@ -195,7 +195,7 @@ function header(d) {
   st.dataset.s = d.status || "";
   st.textContent = d.status || "";
   modelEl.textContent = d.modelName || d.model || "";
-  modelEl.title = d.model || "";
+  modelEl.title = (d.model || "") + " (click to change model or effort in the T3 Code app)";
   work.hidden = d.status !== "running";
 }
 function render(d) {
@@ -259,6 +259,13 @@ log.addEventListener("click", (e) => {
   vs.postMessage(a.dataset.file ? { open: a.dataset.file } : { url: a.dataset.url });
 });
 btn.onclick = send;
+modelEl.onclick = () => vs.postMessage({ openInApp: true });
+modelEl.onkeydown = (e) => {
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    vs.postMessage({ openInApp: true });
+  }
+};
 t.oninput = grow;
 t.onkeydown = (e) => {
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {

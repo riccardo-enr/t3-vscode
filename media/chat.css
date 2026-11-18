@@ -84,7 +84,7 @@ button{font:inherit;cursor:pointer}
 textarea{display:block;width:100%;box-sizing:border-box;min-height:22px;max-height:200px;resize:none;margin:0;padding:2px 0;font:inherit;line-height:1.45;background:none;color:var(--vscode-input-foreground);border:0;outline:0}
 textarea::placeholder{color:var(--vscode-input-placeholderForeground)}
 #row{display:flex;align-items:center;gap:8px;margin-top:4px}
-#model{font-size:11px;font-weight:600;white-space:nowrap;padding:1px 8px;border-radius:10px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground)}
+#model{cursor:pointer;font-size:11px;font-weight:600;white-space:nowrap;padding:1px 8px;border-radius:10px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground)}
 #model:empty{display:none}
 #b{margin-left:auto;padding:3px 12px;border:0;border-radius:6px;font-size:12px;background:var(--vscode-button-background);color:var(--vscode-button-foreground)}
 #b:hover{background:var(--vscode-button-hoverBackground)}
