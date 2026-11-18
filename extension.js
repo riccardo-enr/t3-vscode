@@ -175,6 +175,10 @@ class Threads {
       this.hard = false;
       const list = hard ? await listThreads() : this.list;
       this.list = list;
+      if (hard) {
+        this.listedAt = Date.now();
+        if (this.onList) this.onList(list);
+      }
       const ids = new Set(list.map((t) => t.threadId));
       this.kids = new Map();
       for (const t of list) {
@@ -423,11 +427,51 @@ async function sendToThread(provider, arg) {
   }
 }
 
+const FINISHED = new Set(["completed", "failed", "error", "interrupted", "cancelled"]);
+
+// Status bar (count of running threads) and a notification when a thread finishes.
+// Fed by every thread list: the tree's own refreshes and a light 15s poll.
+function watchThreads(context, provider, chat) {
+  const bar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
+  bar.command = "workbench.view.extension.t3code";
+  const seen = new Map(); // threadId -> last status; a thread seen for the first time never notifies
+  provider.onList = (list) => {
+    const n = list.filter((t) => t.status === "running").length;
+    bar.text = `$(loading~spin) T3 ${n}`;
+    bar.tooltip = `T3 Code: ${n} thread${n > 1 ? "s" : ""} running. Click to show.`;
+    n ? bar.show() : bar.hide();
+    for (const t of list) {
+      const was = seen.get(t.threadId);
+      seen.set(t.threadId, t.status);
+      if (was !== "running" || !FINISHED.has(t.status)) continue;
+      if (chat.view && chat.view.visible && chat.thread && chat.thread.threadId === t.threadId) continue;
+      const bad = t.status === "failed" || t.status === "error";
+      const show = bad ? vscode.window.showWarningMessage : vscode.window.showInformationMessage;
+      show(`T3 Code: "${t.title || t.threadId}" ${t.status}.`, "Open chat").then((a) => a && chat.open(t));
+    }
+  };
+  const tick = async () => {
+    if (Date.now() - (provider.listedAt || 0) < 14000) return; // the tree listed recently: reuse it
+    try {
+      const list = await listThreads();
+      provider.listedAt = Date.now();
+      provider.list = list;
+      provider.onList(list);
+      provider.refresh(true); // re-render the tree from this list, no second CLI call
+    } catch (e) {
+      log("thread poll: " + e.message); // keep the last statuses so a later list still notifies
+    }
+  };
+  tick();
+  context.subscriptions.push(bar, { dispose: clearInterval.bind(null, setInterval(tick, 15000)) });
+}
+
 function activate(context) {
   const provider = new Threads();
   const chat = new Chat(context.extensionUri, context.workspaceState);
   chat.onStatus = () => provider.refresh();
   context.subscriptions.push(chat);
+  watchThreads(context, provider, chat);
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider("t3code.threads", provider),
     // Keep "3m ago" honest without calling the CLI: re-render the cached list once a minute.

@@ -10,7 +10,7 @@
   "capabilities": {
     "untrustedWorkspaces": { "supported": false, "description": "Runs the t3 CLI and git in the workspace." }
   },
-  "activationEvents": [],
+  "activationEvents": ["onStartupFinished"],
   "contributes": {
     "commands": [
       { "command": "t3code.sendSelection", "title": "T3 Code: Send selection (draft)" },
