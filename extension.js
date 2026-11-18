@@ -513,6 +513,7 @@ class Chat {
       }
     } catch (e) {
       this.last = ""; // so the next good poll repaints and clears the error
+      this.stamp = undefined; // and so the state-file gate cannot skip the retry
       v.webview.postMessage({ error: e.message });
     } finally {
       this.busy = false;
