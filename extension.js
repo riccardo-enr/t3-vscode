@@ -208,15 +208,17 @@ class Chat {
     if (this.thread) this.poll(true);
     else this.restore();
   }
-  // Reopen the last thread of this workspace, else the most recently updated open one.
+  // Reopen the last thread of this workspace if it is still open (not settled/snoozed),
+  // else the most recently updated open one. listThreads() already drops settled and snoozed.
   async restore() {
-    let t = this.state.get("t3code.lastThread");
-    if (!t) {
-      try {
-        const list = await listThreads();
-        t = list.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0];
-      } catch (e) {}
-    }
+    const last = this.state.get("t3code.lastThread");
+    let t;
+    try {
+      const list = await listThreads();
+      t =
+        (last && list.find((x) => x.threadId === last.threadId)) ||
+        list.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0];
+    } catch (e) {}
     if (t && !this.thread) this.open(t);
     else this.poll(true);
   }
