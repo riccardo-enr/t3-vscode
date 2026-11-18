@@ -1,6 +1,6 @@
 const vscode = require("vscode");
 const { execFile } = require("child_process");
-const { fetchSummary, summarize } = require("./usage.js");
+const { fetchUsage, summarize } = require("./usage.js");
 
 // T3 Code rejects (does not truncate) link prompts over 8000 chars; stay under it.
 // Also applied to CLI sends for simplicity.
@@ -591,20 +591,23 @@ function openUsage(context) {
   w.html = `<!doctype html><html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${w.cspSource}; script-src 'nonce-${nonce}';">
 <link rel="stylesheet" href="${uri("usage.css")}"></head><body>
-<header><h1>T3 Usage</h1>
-<div class="seg"><input type="radio" name="r" id="r7" checked><label for="r7">7 days</label><input type="radio" name="r" id="r30"><label for="r30">30 days</label></div>
+<header><h1>Usage</h1>
+<select id="prov" aria-label="Provider"><option value="all">All providers</option></select>
+<div class="seg" id="tabs"><input type="radio" name="t" id="tcost" value="cost" checked><label for="tcost">Cost</label><input type="radio" name="t" id="ttokens" value="tokens"><label for="ttokens">Tokens</label><input type="radio" name="t" id="tlimits" value="limits"><label for="tlimits">Limits</label></div>
+<div class="seg" id="range"><input type="radio" name="r" id="r7" checked><label for="r7">7 days</label><input type="radio" name="r" id="r30"><label for="r30">30 days</label></div>
 <button id="refresh">Refresh</button></header>
 <div id="st" role="status"></div>
-<div id="tiles"></div><div id="chart" role="img" aria-label="Cost per day"></div>
-<table><thead><tr><th>Model</th><th>Provider</th><th class="n">Tokens</th><th class="n">Cost</th></tr></thead><tbody id="rows"></tbody></table>
-<div id="note"></div>
+<div id="usage"><div id="tiles"></div><div id="chart" role="img" aria-label="Per day"></div>
+<table><thead><tr><th>Model</th><th>Provider</th><th class="n" id="mh">Cost</th></tr></thead><tbody id="rows"></tbody></table>
+<div id="note"></div></div>
+<div id="limits" hidden></div>
 <script nonce="${nonce}" src="${uri("usage.js")}"></script></body></html>`;
   let seq = 0; // a slow 30-day scan must not overwrite a newer 7-day answer
   const load = async (days) => {
     const mine = ++seq;
     w.postMessage({ kind: "loading" });
     try {
-      const data = summarize(await fetchSummary(days));
+      const data = summarize(await fetchUsage(days));
       if (mine === seq) w.postMessage({ kind: "data", days, data });
     } catch (e) {
       log("usage: " + e.message);
