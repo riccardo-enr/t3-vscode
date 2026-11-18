@@ -158,8 +158,9 @@ function openThread(t) {
 // Chat view in the T3 Code sidebar: polls `t3 thread show`; rendering lives in media/chat.js.
 // ponytail: refetches the whole history each poll, no streaming; add a server push if the CLI ever offers one.
 class Chat {
-  constructor(extensionUri) {
+  constructor(extensionUri, state) {
     this.extensionUri = extensionUri;
+    this.state = state; // workspaceState: remembers the last opened thread per workspace
     this.thread = undefined;
     this.view = undefined;
     this.last = "";
@@ -204,13 +205,27 @@ class Chat {
     });
     view.onDidChangeVisibility(() => this.poll(true));
     view.onDidDispose(() => (this.view = undefined));
-    this.poll(true);
+    if (this.thread) this.poll(true);
+    else this.restore();
+  }
+  // Reopen the last thread of this workspace, else the most recently updated open one.
+  async restore() {
+    let t = this.state.get("t3code.lastThread");
+    if (!t) {
+      try {
+        const list = await listThreads();
+        t = list.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0];
+      } catch (e) {}
+    }
+    if (t && !this.thread) this.open(t);
+    else this.poll(true);
   }
   async open(t) {
     if (!t || !t.threadId) return;
     this.thread = t;
     this.status = ""; // don't treat the switch itself as a status change
-    await vscode.commands.executeCommand("t3code.chat.focus");
+    this.state.update("t3code.lastThread", { threadId: t.threadId, title: t.title, link: t.link });
+    if (!this.view || !this.view.visible) await vscode.commands.executeCommand("t3code.chat.focus");
     if (this.view) this.view.description = t.title || t.threadId;
     this.hurry();
     this.poll(true);
@@ -325,7 +340,7 @@ async function sendToThread(provider, arg) {
 
 function activate(context) {
   const provider = new Threads();
-  const chat = new Chat(context.extensionUri);
+  const chat = new Chat(context.extensionUri, context.workspaceState);
   chat.onStatus = () => provider.refresh();
   context.subscriptions.push(chat);
   context.subscriptions.push(
