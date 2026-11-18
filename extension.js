@@ -135,6 +135,36 @@ const turnContent = {
   },
 };
 
+// "T3" badge on files changed in the open chat thread's last turn (same T3-internal checkpoints as above).
+class TurnBadges {
+  constructor() {
+    this._emitter = new vscode.EventEmitter();
+    this.onDidChangeFileDecorations = this._emitter.event;
+    this.files = new Set(); // absolute paths
+  }
+  provideFileDecoration(uri) {
+    if (uri.scheme === "file" && this.files.has(uri.fsPath))
+      return { badge: "T3", tooltip: "Changed in the last turn of the open T3 Code thread" };
+  }
+  // Recompute for a thread (or clear with none). Errors (no git, no checkpoints) just clear the badges.
+  async update(t) {
+    const id = t && t.threadId;
+    this.for = id;
+    let next = new Set();
+    if (id) {
+      try {
+        const c = await turnChanges(id);
+        if (this.for !== id) return; // the chat moved to another thread meanwhile
+        const path = require("path");
+        next = new Set(c.files.filter((f) => f.status !== "D").map((f) => path.join(c.root, f.path)));
+      } catch (e) {}
+    }
+    const touched = [...this.files, ...next].map((p) => vscode.Uri.file(p));
+    this.files = next;
+    this._emitter.fire(touched);
+  }
+}
+
 async function showTurnChanges(t) {
   if (!t || !t.threadId) return vscode.window.showWarningMessage("T3 Code: open a thread first.");
   let c;
@@ -395,6 +425,7 @@ class Chat {
     this.thread = t;
     this.status = ""; // don't treat the switch itself as a status change
     this.state.update("t3code.lastThread", { threadId: t.threadId, title: t.title, link: t.link });
+    if (this.onThread) this.onThread(t);
     if (!this.view || !this.view.visible) await vscode.commands.executeCommand("t3code.chat.focus");
     if (this.view) this.view.description = t.title || t.threadId;
     this.hurry();
@@ -640,7 +671,14 @@ function watchThreads(context, provider, chat) {
 function activate(context) {
   const provider = new Threads();
   const chat = new Chat(context.extensionUri, context.workspaceState);
-  chat.onStatus = () => provider.refresh();
+  const badges = new TurnBadges();
+  chat.onThread = (t) => badges.update(t);
+  // A status change (e.g. a turn just finished) refreshes tree icons and the changed-file badges.
+  chat.onStatus = () => {
+    provider.refresh();
+    badges.update(chat.thread);
+  };
+  context.subscriptions.push(vscode.window.registerFileDecorationProvider(badges));
   context.subscriptions.push(chat);
   watchThreads(context, provider, chat);
   context.subscriptions.push(
