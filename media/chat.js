@@ -3,6 +3,8 @@ const vs = acquireVsCodeApi();
 const log = document.getElementById("log");
 const st = document.getElementById("st");
 const work = document.getElementById("work");
+const ask = document.getElementById("ask");
+ask.onclick = () => vs.postMessage({ openInApp: true });
 const t = document.getElementById("t");
 const btn = document.getElementById("b");
 const modelEl = document.getElementById("model");
@@ -199,6 +201,9 @@ function header(d) {
   modelEl.textContent = d.modelName || d.model || "";
   modelEl.title = (d.model || "") + " (click to change model or effort in the T3 Code app)";
   work.hidden = d.status !== "running";
+  // The CLI exposes only the count of pending questions or approvals, not their text, so answer in the app.
+  ask.hidden = !d.ask;
+  ask.textContent = d.ask ? `Waiting for your answer (${d.ask}). Click to answer in T3 Code` : "";
 }
 function render(d) {
   switchTo(d.threadId);

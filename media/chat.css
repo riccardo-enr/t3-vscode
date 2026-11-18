@@ -458,6 +458,10 @@ textarea {
    outline: 0
 }
 
+textarea:focus-visible {
+   outline: 0
+}
+
 textarea::placeholder {
    color: var(--vscode-input-placeholderForeground)
 }
@@ -572,4 +576,17 @@ textarea:disabled {
       animation: none !important;
       transition: none !important
    }
+}
+#ask {
+  margin: 6px 12px;
+  padding: 6px 10px;
+  text-align: left;
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+#ask:hover {
+  background: var(--vscode-button-hoverBackground);
 }

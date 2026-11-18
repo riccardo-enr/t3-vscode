@@ -529,7 +529,7 @@ class Chat {
   paint(t) {
     const c = this.cache.get(t.threadId);
     if (this.view) this.view.webview.postMessage(c ? { ...c, jump: true } : { loading: true, threadId: t.threadId, status: t.status, model: t.model, modelName: prettyModel(t.model) });
-    this.last = c ? JSON.stringify([t.threadId, c.status, c.messages]) : "";
+    this.last = c ? JSON.stringify([t.threadId, c.status, c.ask, c.messages]) : "";
     this.poll(true, !c);
   }
   // force: run even if a poll is in flight; jump: scroll to the bottom after painting.
@@ -548,10 +548,22 @@ class Chat {
       if (seq !== this.seq) return; // a newer poll started (thread switch or send): drop this stale result
       this.stamp = stamp; // only after a good poll, so a failed one is retried
       this.stampId = id;
+      if (out.thread.settled) {
+        // Settled threads vanish from the tree, so empty the pane too (un-settling does not reopen it).
+        this.thread = undefined;
+        this.last = "";
+        this.state.update("t3code.lastThread", undefined);
+        this.setWorktree(undefined);
+        v.description = undefined;
+        if (this.onThread) this.onThread(undefined);
+        if (this.onStatus) this.onStatus();
+        return v.webview.postMessage({ empty: true });
+      }
       if (this.status && this.status !== out.thread.status && this.onStatus) this.onStatus(); // refresh tree icons
       this.status = out.thread.status;
       this.setWorktree(out.thread.worktreePath);
-      const s = JSON.stringify([id, out.thread.status, out.messages]);
+      const ask = out.thread.pendingRequestCount || 0;
+      const s = JSON.stringify([id, out.thread.status, ask, out.messages]);
       if (s !== this.last || jump) {
         this.last = s;
         const msg = {
@@ -559,6 +571,7 @@ class Chat {
           status: out.thread.status,
           model: out.thread.model,
           modelName: prettyModel(out.thread.model),
+          ask,
           messages: out.messages,
         };
         this.cache.delete(id); // re-insert so the Map keeps the most recent threads last
@@ -623,6 +636,7 @@ function chatHtml(webview, media) {
 <div id="log" role="log" aria-live="polite"></div>
 <div id="empty" hidden><div class="logo"></div><div id="emptytxt">Pick a thread in the Threads view to see its chat here.</div></div>
 <div id="skel" aria-hidden="true"><i></i><i></i><i></i></div>
+<button id="ask" hidden></button>
 <div id="work" hidden><i></i><i></i><i></i><span>Working</span></div>
 </div>
 <div id="bar"><textarea id="t" rows="1" aria-label="Message" placeholder="Message the agent"></textarea>
