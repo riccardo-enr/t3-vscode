@@ -25,12 +25,15 @@ const { md, body, collapse } = ctx;
 // extension.js only touches `vscode` inside functions, so an empty stub is enough to load it.
 const Module = require("module"), load = Module._load;
 Module._load = (req, ...a) => (req === "vscode" ? {} : load(req, ...a));
-const { prettyModel, ago, stateStamp } = require("../extension.js");
+const { prettyModel, ago, stateStamp, checkpointScope } = require("../extension.js");
 Module._load = load;
 
 assert.strictEqual(prettyModel("claude-opus-5-5"), "Opus 5.5");
 assert.strictEqual(prettyModel("gpt-5.4"), "gpt-5.4");
 assert.strictEqual(prettyModel(undefined), "");
+
+// Checkpoint ref scope: value read from real refs in a T3 project repo (2026-11-18).
+assert.strictEqual(checkpointScope("35a78732-e5e2-4256-986f-33c7c0c8584c"), "MjQyMWFiNDJkMDk3Yjg3NTg3NDYwMTc2ZDQ1Yzk5ZDM");
 
 // State stamp: changes when the T3 state file changes; undefined (poll as usual) when it is missing.
 {

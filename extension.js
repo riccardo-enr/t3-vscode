@@ -83,6 +83,87 @@ function stateStamp() {
   return s === "," ? undefined : s;
 }
 
+// ---- Turn changes. RELIES ON T3 INTERNALS, not a public API: may break on a T3 update. ----
+// T3 snapshots the project repo after each turn as refs/t3/orchestration-v2/checkpoints/<H>/ordinal/<N>
+// (N = 0 is the state before the first turn). <H> is base64 (no '=' padding) of the first 32 hex chars of
+// sha256("checkpoint-scope:thread:<threadId>:name:root"); verified against real refs on 2026-11-18.
+function checkpointScope(threadId) {
+  const hex = require("crypto").createHash("sha256").update(`checkpoint-scope:thread:${threadId}:name:root`).digest("hex");
+  return Buffer.from(hex.slice(0, 32)).toString("base64").replace(/=+$/, "");
+}
+
+function git(cwd, args) {
+  return new Promise((resolve, reject) => {
+    execFile("git", args, { cwd, maxBuffer: 64 * 1024 * 1024 }, (err, out, stderr) =>
+      err ? reject(new Error((stderr || err.message).trim())) : resolve(out)
+    );
+  });
+}
+
+// Files changed by the thread's last turn: { root, from, to, n, files: [{ status, path }] }, paths relative to root.
+async function turnChanges(threadId) {
+  const folder = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
+  if (!folder) throw new Error("open a folder first.");
+  let root;
+  try {
+    root = (await git(folder.uri.fsPath, ["rev-parse", "--show-toplevel"])).trim();
+  } catch (e) {
+    throw new Error("this workspace is not a git repository, so T3 keeps no turn checkpoints for it.");
+  }
+  const base = `refs/t3/orchestration-v2/checkpoints/${checkpointScope(threadId)}/ordinal/`;
+  const ords = (await git(root, ["for-each-ref", "--format=%(refname)", base]))
+    .split("\n")
+    .filter(Boolean)
+    .map((r) => Number(r.slice(base.length)))
+    .filter((n) => Number.isInteger(n) && n >= 0);
+  if (!ords.length) throw new Error("no T3 checkpoints for this thread in this repository.");
+  const n = Math.max(...ords); // refs sort as text (1, 10, 2), so take the numeric max
+  if (n === 0 || !ords.includes(n - 1)) throw new Error("this thread has no finished turn with a checkpoint yet.");
+  const from = base + (n - 1), to = base + n;
+  const out = (await git(root, ["diff", "--no-renames", "--name-status", "-z", from, to])).split("\0");
+  const files = [];
+  for (let i = 0; i + 1 < out.length; i += 2) files.push({ status: out[i], path: out[i + 1] });
+  return { root, from, to, n, files };
+}
+
+// Read-only file contents at a checkpoint: t3-turn:/abs/path?{"root":..,"ref":..}. Missing files read as "".
+const turnContent = {
+  provideTextDocumentContent(uri) {
+    const { root, ref } = JSON.parse(uri.query);
+    const rel = require("path").relative(root, uri.fsPath).split(require("path").sep).join("/");
+    return git(root, ["show", `${ref}:${rel}`]).catch(() => "");
+  },
+};
+
+async function showTurnChanges(t) {
+  if (!t || !t.threadId) return vscode.window.showWarningMessage("T3 Code: open a thread first.");
+  let c;
+  try {
+    c = await turnChanges(t.threadId);
+  } catch (e) {
+    return vscode.window.showWarningMessage("T3 Code: " + e.message);
+  }
+  if (!c.files.length) return vscode.window.showInformationMessage(`T3 Code: the last turn (${c.n}) changed no files.`);
+  const path = require("path");
+  const side = (ref, rel) =>
+    vscode.Uri.file(path.join(c.root, rel)).with({ scheme: "t3-turn", query: JSON.stringify({ root: c.root, ref }) });
+  const title = `T3 turn ${c.n}: ${t.title || t.threadId}`;
+  const rows = c.files.map((f) => [vscode.Uri.file(path.join(c.root, f.path)), side(c.from, f.path), side(c.to, f.path)]);
+  try {
+    await vscode.commands.executeCommand("vscode.changes", title, rows); // multi-file diff, newer VS Code only
+  } catch (e) {
+    log("vscode.changes unavailable (" + e.message + "), falling back to one diff per file");
+    const pick =
+      rows.length === 1
+        ? { r: rows[0] }
+        : await vscode.window.showQuickPick(
+            c.files.map((f, i) => ({ label: f.path, description: f.status, r: rows[i] })),
+            { placeHolder: `${title}: ${rows.length} files changed` }
+          );
+    if (pick) await vscode.commands.executeCommand("vscode.diff", pick.r[1], pick.r[2], `${path.basename(pick.r[0].fsPath)} (${title})`);
+  }
+}
+
 // Run the t3 CLI. Resolves with stdout only (log lines can land on stderr).
 function t3(args, input) {
   return new Promise((resolve, reject) => {
@@ -573,10 +654,12 @@ function activate(context) {
     vscode.commands.registerCommand("t3code.openChat", (t) => chat.open(t)),
     vscode.commands.registerCommand("t3code.chatRefresh", () => chat.poll(true)),
     vscode.commands.registerCommand("t3code.chatOpenInApp", () => openThread(chat.thread)),
+    vscode.workspace.registerTextDocumentContentProvider("t3-turn", turnContent),
+    vscode.commands.registerCommand("t3code.showTurnChanges", (arg) => showTurnChanges(arg && arg.thread ? arg.thread : chat.thread)),
     vscode.commands.registerCommand("t3code.sendToThread", (arg) => sendToThread(provider, arg)),
     vscode.commands.registerCommand("t3code.newThread", () => newThread(provider, chat)),
     vscode.commands.registerCommand("t3code.openUsage", () => openUsage(context))
   );
 }
 
-module.exports = { activate, ago, prettyModel, stateStamp };
+module.exports = { activate, ago, prettyModel, stateStamp, checkpointScope };

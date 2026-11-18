@@ -21,7 +21,8 @@
       { "command": "t3code.openChat", "title": "T3 Code: Open chat" },
       { "command": "t3code.openUsage", "title": "T3 Code: Open usage dashboard" },
       { "command": "t3code.chatRefresh", "title": "T3 Code: Refresh chat", "icon": "$(refresh)" },
-      { "command": "t3code.chatOpenInApp", "title": "T3 Code: Open chat thread in T3 Code app", "icon": "$(link-external)" }
+      { "command": "t3code.chatOpenInApp", "title": "T3 Code: Open chat thread in T3 Code app", "icon": "$(link-external)" },
+      { "command": "t3code.showTurnChanges", "title": "T3 Code: Show changes of last turn", "icon": "$(diff)" }
     ],
     "viewsContainers": {
       "activitybar": [{ "id": "t3code", "title": "T3 Code", "icon": "icon.svg" }]
@@ -47,11 +48,13 @@
         { "command": "t3code.newThread", "when": "view == t3code.threads", "group": "navigation@1" },
         { "command": "t3code.refresh", "when": "view == t3code.threads", "group": "navigation@2" },
         { "command": "t3code.chatRefresh", "when": "view == t3code.chat", "group": "navigation@1" },
-        { "command": "t3code.chatOpenInApp", "when": "view == t3code.chat", "group": "navigation@2" }
+        { "command": "t3code.chatOpenInApp", "when": "view == t3code.chat", "group": "navigation@2" },
+        { "command": "t3code.showTurnChanges", "when": "view == t3code.chat", "group": "navigation@3" }
       ],
       "view/item/context": [
         { "command": "t3code.openThread", "when": "view == t3code.threads && viewItem == thread" },
-        { "command": "t3code.sendToThread", "when": "view == t3code.threads && viewItem == thread" }
+        { "command": "t3code.sendToThread", "when": "view == t3code.threads && viewItem == thread" },
+        { "command": "t3code.showTurnChanges", "when": "view == t3code.threads && viewItem == thread" }
       ],
       "editor/context": [
         { "command": "t3code.sendSelection", "when": "editorHasSelection", "group": "t3code" },
