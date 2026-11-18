@@ -25,6 +25,10 @@ Plain JavaScript, no build step, no dependencies. It talks to T3 Code through th
     Web links open in the browser.
   - A badge shows the thread's model (for example "Opus 5.5"). Click it to open the thread in the
     T3 Code app, where model and effort are changed (the CLI cannot change them).
+  - A chip next to the model badge shows the active file and selected lines (`extension.js:120-140`).
+    When it is on, sending adds a last line with the file's absolute path and line range (not the
+    code). Click the chip to leave it out; it turns back on when the file or selection changes.
+  - Paste an image (Ctrl+V) to save it under `/tmp/t3-vscode-images/` and insert its path.
   - Title-bar buttons: refresh, open in the app, show the last turn's changes, and (for threads
     that run in a git worktree) open that worktree in Source Control.
 - **Last turn changes** (`T3 Code: Show changes of last turn`, see the caveat under Limits)
