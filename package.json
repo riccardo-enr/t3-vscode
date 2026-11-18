@@ -15,6 +15,7 @@
     "commands": [
       { "command": "t3code.sendSelection", "title": "T3 Code: Send selection (draft)" },
       { "command": "t3code.sendToThread", "title": "T3 Code: Send selection to thread" },
+      { "command": "t3code.newThread", "title": "T3 Code: New thread", "icon": "$(add)" },
       { "command": "t3code.refresh", "title": "T3 Code: Refresh threads", "icon": "$(refresh)" },
       { "command": "t3code.openThread", "title": "T3 Code: Open in T3 Code app" },
       { "command": "t3code.openChat", "title": "T3 Code: Open chat" },
@@ -42,7 +43,8 @@
         { "command": "t3code.openChat", "when": "false" }
       ],
       "view/title": [
-        { "command": "t3code.refresh", "when": "view == t3code.threads", "group": "navigation" },
+        { "command": "t3code.newThread", "when": "view == t3code.threads", "group": "navigation@1" },
+        { "command": "t3code.refresh", "when": "view == t3code.threads", "group": "navigation@2" },
         { "command": "t3code.chatRefresh", "when": "view == t3code.chat", "group": "navigation@1" },
         { "command": "t3code.chatOpenInApp", "when": "view == t3code.chat", "group": "navigation@2" }
       ],
