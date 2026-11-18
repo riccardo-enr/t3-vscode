@@ -46,7 +46,7 @@ Plain JavaScript, no build step, no dependencies. It talks to T3 Code through th
 | --- | --- |
 | Ctrl+Alt+Shift+D (with a selection) | Send selection (draft) |
 | Ctrl+Alt+Shift+S (with a selection) | Send selection to thread (sends right away) |
-| Ctrl+Alt+Shift+C | Focus the Chat view |
+| Ctrl+Alt+Shift+T | Focus the Chat view |
 
 Change them in Keyboard Shortcuts (search for "T3 Code").
 
