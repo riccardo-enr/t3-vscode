@@ -1,6 +1,8 @@
-# T3 Code Bridge &mdash; Your Agent Threads in VS Code
+# Threads for T3 Code &mdash; Your Agent Threads in VS Code
 
 > See every T3 Code thread of your workspace, chat with it, and send code to it &mdash; without leaving the editor.
+
+**Unofficial.** This is a community project, not affiliated with or endorsed by T3 Tools Inc. "T3 Code" is used only to name the app this extension connects to.
 
 A small, open-source VS Code client for the [T3 Code](https://t3.codes) server: one live WebSocket, no CLI. Plain JavaScript, no build step, no dependencies.
 
@@ -173,12 +175,6 @@ Files:
   all message text escaped before rendering).
 - [package.json](package.json): views, commands, menus.
 - [test/chat_check.js](test/chat_check.js): self-check for the webview rendering.
-
-# Credits
-
-The activity-bar icon ([icon.svg](icon.svg)) uses the T3 glyphs from the T3 Code logo
-(`assets/prod/logo.svg` in [pingdotgg/t3code](https://github.com/pingdotgg/t3code)), MIT License,
-Copyright (c) 2026 T3 Tools Inc.
 
 # License
 
