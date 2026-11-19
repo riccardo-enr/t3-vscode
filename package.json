@@ -2,7 +2,7 @@
   "name": "t3-vscode",
   "displayName": "Threads for T3 Code",
   "description": "Unofficial VS Code client for the T3 Code server: threads, live chat and an agent dashboard.",
-  "version": "0.0.1",
+  "version": "0.1.1",
   "publisher": "riccardo-enr",
   "license": "MIT",
   "repository": { "type": "git", "url": "https://github.com/riccardo-enr/t3-vscode.git" },
