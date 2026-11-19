@@ -47,3 +47,8 @@
 ## 2026-11-19 - t3-vscode
 - What went wrong: answered an issue triage with a markdown table that had long cells; it did not render for the user.
 - Rule: in chat replies use short headed bullet lists, not tables, especially when cells hold more than a few words.
+
+## 2026-11-19 - t3-vscode
+- What went wrong: implemented `/clear` as "next message starts a fresh session in the same thread"; the user expected a new chat, as in the app.
+- Root cause: copied the protocol's `freshContext` flag instead of checking what `/clear` does for the user in the app.
+- Rule: for a command borrowed from the app, match what the user sees happen (new chat), not the nearest protocol flag.
