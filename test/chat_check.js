@@ -23,7 +23,7 @@ const ctx = {
 };
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(path.join(__dirname, "../media/chat.js"), "utf8") + "\n;this.md=md;this.body=body;this.collapse=collapse;this.askCard=askCard;" +
-  "this.slash={set:(th,v)=>{thread=th;t.value=v;},update:updateMenu,pick,names:()=>items.map((c)=>c.name).join('|'),menu,t,prov:(c)=>{provCmds=c;}};", ctx);
+  "this.slash={set:(th,v)=>{thread=th;t.value=v;},update:updateMenu,send,pick,names:()=>items.map((c)=>c.name).join('|'),menu,t,prov:(c)=>{provCmds=c;}};", ctx);
 const { md, body, collapse, askCard } = ctx;
 
 // extension.js only touches `vscode` inside functions, so an empty stub is enough to load it.
@@ -151,6 +151,10 @@ assert.deepStrictEqual(shape(collapse([u("r", "q"), a("r", "x"), u("r", "more"),
   S.pick(0); // /clear sends no text, it asks for a new thread
   assert.strictEqual(JSON.stringify(posted), JSON.stringify([{ newThread: true }]));
   assert.strictEqual(S.t.value, "");
+  posted.length = 0;
+  S.set("th", "/clear"); // typed, then Enter
+  S.send();
+  assert.strictEqual(JSON.stringify(posted), JSON.stringify([{ newThread: true }]));
   posted.length = 0;
   S.set("th", "/settle");
   S.update();

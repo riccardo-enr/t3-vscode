@@ -7,8 +7,6 @@ const ask = document.getElementById("ask");
 ask.onclick = () => vs.postMessage({ openInApp: true });
 const cardEl = document.getElementById("card");
 let cardId = "", cardLock = () => {};
-const freshEl = document.getElementById("fresh");
-freshEl.onclick = () => vs.postMessage({ fresh: false });
 const t = document.getElementById("t");
 const btn = document.getElementById("b");
 const modelEl = document.getElementById("model");
@@ -284,7 +282,6 @@ function header(d) {
     cardLock = c.lock;
     cardEl.replaceChildren(c.node);
   }
-  freshEl.hidden = !d.fresh;
 }
 function render(d) {
   switchTo(d.threadId);
@@ -560,7 +557,7 @@ addEventListener("message", (e) => {
   if (d.error) { st.className = "err"; st.textContent = "error: " + d.error; if (!skel.hidden) mode(""); return; }
   if (d.empty) { switchTo(""); emptyTxt.textContent = PICK; mode("empty"); st.textContent = ""; modelEl.textContent = ""; work.hidden = true; return; }
   if (d.loading) { switchTo(d.threadId); mode(log.children.length ? "" : "loading"); header(d); return; }
-  if (d.imagePath) return insert(d.imagePath);
+  if (d.imagePath) return addThumb(d.imagePath), insert(d.imagePath);
   if (Array.isArray(d.mentions)) {
     mentions = d.mentions;
     if (document.activeElement === t) updateMenu();

@@ -461,7 +461,6 @@ class Chat {
     this.last = "";
     this.status = "";
     this.msgs = undefined; // messages of this.thread; undefined until its snapshot arrives
-    this.fresh = new Set(); // thread ids whose next message starts a fresh session (/clear)
   }
   dispose() {
     if (this.unwatch) this.unwatch();
@@ -502,10 +501,6 @@ class Chat {
         }
         return view.webview.postMessage({ mentions: items });
       }
-      if (typeof m.fresh === "boolean" && this.thread) {
-        this.fresh[m.fresh ? "add" : "delete"](this.thread.threadId);
-        return this.render();
-      }
       if (m.newThread) return newThread(this);
       if (m.settle) return threadAction("settle", this.thread, this);
       // Answers to a pending question or approval. askReply refuses anything the server did not offer.
@@ -545,8 +540,7 @@ class Chat {
         const body = (m.ctx === true && this.ctx ? m.text + "\n\n" + ctxRef(this.ctx) : m.text) + mc;
         const text = (quotes ? quotes + "\n\n" : "") + body.trim();
         if (!text) return view.webview.postMessage({ sendError: "nothing to send" });
-        await client.send(id, text, this.fresh.has(id));
-        this.fresh.delete(id);
+        await client.send(id, text);
         view.webview.postMessage({ sent: true });
         this.jump = true;
       } catch (e) {
@@ -647,7 +641,7 @@ class Chat {
     if (this.status && t.status && this.status !== t.status && this.onStatus) this.onStatus(); // tree icons, badges
     this.status = t.status || "";
     this.setWorktree(t.worktreePath);
-    const head = { threadId: id, status: t.status, model: t.model, modelName: modelLabel(id, t.model), fresh: this.fresh.has(id) };
+    const head = { threadId: id, status: t.status, model: t.model, modelName: modelLabel(id, t.model) };
     if (!this.msgs) {
       if (this.last === "loading") return;
       this.last = "loading";
