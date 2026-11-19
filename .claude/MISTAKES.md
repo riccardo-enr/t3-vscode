@@ -19,3 +19,12 @@
 - What went wrong: committed a duplicated pair of CSS rules (f9dac03). My index-only staging helper treated "new text present" as "already applied", but the new text contained the old anchor, so the edit was applied twice.
 - Root cause: idempotency check that only works when the replacement does not contain its anchor; also two other sessions were editing the same files uncommitted, which is why staging had to bypass the working tree.
 - Rule: after any scripted edit, grep the committed blob (`git show :file`) for duplicates of the added lines; and never run parallel sessions on the same files (AGENTS.md: disjoint files only).
+
+## 2026-11-19 - t3-vscode
+- What went wrong: shipped t3Client.js with a reconnect guard (`this.lost === this.ws`) that stopped all retries after the first failed reconnect; also let the status bar depend on the tree's getChildren, which VS Code calls only while the view is visible. Both found in my own review, after I had reported the work as done.
+- Root cause: tested only the first connect and only with the tree visible; did not walk the failure path (connected -> server down -> retry fails -> retry again).
+- Rule: for any reconnect or retry loop, test at least two failures in a row and a recovery (kill and restart the server); for VS Code views, do not drive non-view state from a provider callback.
+
+## 2026-11-19 - t3-vscode
+- What went wrong: `pkill -f "t3-spike"` killed my own shell, because the shell's command line contained the pattern; the rest of that command never ran.
+- Rule: never pkill -f with a pattern that appears in the same command; use a timeout on the started process, or kill by the pid it wrote.

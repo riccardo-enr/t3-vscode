@@ -36,7 +36,7 @@ Read the whole history and reply without switching windows.
 - **Links that work** &mdash; file links and path-like code spans (`src/foo.js:42`) open in a VS Code editor at that line. Web links open in the browser.
 - **Open-file chip** &mdash; shows the active file and selected lines (`extension.js:120-140`). When on, a send adds the file's absolute path and line range (not the code). Click the chip to leave it out.
 - **Paste images** &mdash; Ctrl+V saves the image under `/tmp/t3-vscode-images/` and inserts its path.
-- **Model badge** &mdash; click it to open the thread in the app, where model and effort are changed (the CLI cannot change them).
+- **Model badge** &mdash; shows model and effort; click it to pick any model of an enabled provider (Claude, Codex, ...) and its effort level; another provider's model switches the thread to it (needs the live connection; without it the click opens the app).
 - **Title-bar buttons** &mdash; refresh, open in the app, show the last turn's changes, and open the worktree in Source Control for threads that run in one.
 
 # Send Code to an Agent &mdash; Editor Commands
@@ -119,12 +119,27 @@ Before each timed poll the extension checks the modification time of T3's state 
 good poll, the `t3` call is skipped. Opening a thread, sending, or refreshing always polls. The file
 changes every few seconds while any T3 thread runs, so this saves CPU mainly when T3 is idle.
 
+# Live connection and agent dashboard
+
+The extension keeps one WebSocket open to the local T3 server ([t3Client.js](t3Client.js)). It mints a
+5-minute token with `t3 auth session issue` (scopes `orchestration:read`, `orchestration:operate`,
+`diagnostics:read`) on each connect, then subscribes to the thread list. While connected:
+
+- The Threads tree and the status bar update when the server pushes a change. The 15 s `t3` poll is off.
+- **T3 Code: Open agent dashboard** shows one card per thread, sorted: waiting for you, running, failed, rest.
+  Sub-agents nest under their parent. Cards have Open chat, Open in app, Stop and Settle.
+- **Stop thread** (tree inline button, chat title bar) and **Settle thread** (tree context menu) use
+  commands the CLI does not have.
+
+If the connection fails, the old CLI polling path runs unchanged (it also needs the server, so it does not
+help when the server is down). The protocol is internal to T3; tags were read from server 0.1.10.
+The chat view still polls; approval text and the model picker are not done yet.
+
 # Limits
 
 - The sidebar covers the current workspace only (`t3 thread list` is per project, and the CLI has
   no command to list projects).
 - No live streaming: replies appear on the next poll.
-- The effort level (for example "Medium") is not shown, because the CLI does not report it.
 - Subagents started inside a turn (not as T3 threads) do not appear in the tree.
 - **Last turn changes and the "T3" file badges rely on T3 internals.** They read the git refs T3
   keeps per turn (`refs/t3/orchestration-v2/checkpoints/<hash of thread id>/ordinal/<N>`), which
