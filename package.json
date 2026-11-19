@@ -5,6 +5,7 @@
   "version": "0.1.1",
   "publisher": "riccardo-enr",
   "license": "MIT",
+  "icon": "icon.png",
   "repository": { "type": "git", "url": "https://github.com/riccardo-enr/t3-vscode.git" },
   "bugs": { "url": "https://github.com/riccardo-enr/t3-vscode/issues" },
   "homepage": "https://github.com/riccardo-enr/t3-vscode#readme",
