@@ -430,11 +430,57 @@ button {
 
 /* ---- composer ---- */
 #bar {
+   position: relative;
    margin: 0 10px 10px;
    padding: 6px 6px 4px 10px;
    border-radius: 8px;
    background: var(--vscode-input-background);
    border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, transparent))
+}
+
+/* The / command menu, above the composer, in the editor's suggest-widget colors. */
+#menu {
+   position: absolute;
+   left: 0;
+   right: 0;
+   bottom: calc(100% + 4px);
+   max-height: 240px;
+   overflow-y: auto;
+   z-index: 10;
+   padding: 3px 0;
+   border-radius: 6px;
+   color: var(--vscode-editorSuggestWidget-foreground, var(--vscode-foreground));
+   background: var(--vscode-editorSuggestWidget-background, var(--vscode-editorWidget-background));
+   border: 1px solid var(--vscode-editorSuggestWidget-border, var(--vscode-widget-border, transparent));
+   box-shadow: 0 2px 8px var(--vscode-widget-shadow, transparent)
+}
+
+#menu > div {
+   display: flex;
+   gap: 8px;
+   padding: 3px 10px;
+   cursor: pointer;
+   white-space: nowrap
+}
+
+#menu > div:hover {
+   background: var(--vscode-list-hoverBackground)
+}
+
+#menu > div.sel {
+   color: var(--vscode-editorSuggestWidget-selectedForeground, var(--vscode-list-activeSelectionForeground));
+   background: var(--vscode-editorSuggestWidget-selectedBackground, var(--vscode-list-activeSelectionBackground))
+}
+
+#menu .name {
+   flex: none;
+   font-weight: 600
+}
+
+#menu .desc {
+   overflow: hidden;
+   text-overflow: ellipsis;
+   opacity: .75
 }
 
 #bar:focus-within {
@@ -577,7 +623,8 @@ textarea:disabled {
       transition: none !important
    }
 }
-#ask {
+#ask,
+#fresh {
   margin: 6px 12px;
   padding: 6px 10px;
   text-align: left;
@@ -587,6 +634,7 @@ textarea:disabled {
   border-radius: 4px;
   cursor: pointer;
 }
-#ask:hover {
+#ask:hover,
+#fresh:hover {
   background: var(--vscode-button-hoverBackground);
 }

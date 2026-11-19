@@ -39,6 +39,7 @@ Read the whole history and reply without switching windows.
 - **Paste images** &mdash; Ctrl+V saves the image under `/tmp/t3-vscode-images/` and inserts its path.
 - **Live replies** &mdash; text appears as the agent writes it, pushed by the server.
 - **Model badge** &mdash; shows model and effort; click it to pick any model of an enabled provider (Claude, Codex, ...) and its effort level; another provider's model switches the thread to it.
+- **Slash commands** &mdash; typing `/` opens a menu of the commands below plus the thread provider's own (Up/Down, Enter or Tab to pick, Esc to close). `/clear` makes the next message start a fresh session (earlier messages stay visible; click the banner to keep the current session). `/model` opens the model picker; `/effort` changes only the effort of the current model; `/settle` settles the open thread. Provider commands (`/compact`, `/review`, skills) are sent as text, as the app does. `/side` and `/btw` need the app.
 - **Title-bar buttons** &mdash; refresh, open in the app, show the last turn's changes, and open the worktree in Source Control for threads that run in one.
 
 # Send Code to an Agent &mdash; Editor Commands
@@ -112,7 +113,7 @@ nothing else talks to T3. Every change is pushed by the server; nothing polls.
 | Login | `POST /oauth/token` once (pairing code -> 30-day bearer), then `POST /api/auth/websocket-ticket` per connect |
 | Thread list, status bar, notifications | `orchestration.subscribeShell` (snapshot, then pushed changes) |
 | Chat history | `orchestration.subscribeThread` (snapshot, then `message.updated` events) |
-| Sending a message | `message.dispatch` with `createdBy: "user"` |
+| Sending a message | `message.dispatch` with `createdBy: "user"` (`freshContext: true` after `/clear`) |
 | New thread | `orchestration.launchThread` (model and modes of the project's newest thread) |
 | Stop, settle, model and effort | `thread.stop`, `thread.settle`, `thread.model-selection.set` |
 | Usage dashboard | `server.getUsageSummary`, `server.getConfig` |

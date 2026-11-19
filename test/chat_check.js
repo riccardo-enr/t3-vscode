@@ -10,16 +10,20 @@ class N {
   append(...k) { this.kids.push(...k); }
   setAttribute(k, v) { this[k] = v; }
   addEventListener() {}
-  replaceChildren() { this.kids = []; }
+  replaceChildren(...k) { this.kids = k; }
+  scrollIntoView() {}
+  focus() {}
   get children() { return this.kids; }
 }
+const posted = [];
 const ctx = {
-  acquireVsCodeApi: () => ({ postMessage() {} }),
+  acquireVsCodeApi: () => ({ postMessage: (m) => posted.push(m) }),
   document: { createElement: (t) => new N(t), getElementById: (id) => new N(id) },
   addEventListener() {}, setTimeout, URLSearchParams,
 };
 vm.createContext(ctx);
-vm.runInContext(fs.readFileSync(path.join(__dirname, "../media/chat.js"), "utf8") + "\n;this.md=md;this.body=body;this.collapse=collapse;", ctx);
+vm.runInContext(fs.readFileSync(path.join(__dirname, "../media/chat.js"), "utf8") + "\n;this.md=md;this.body=body;this.collapse=collapse;" +
+  "this.slash={set:(th,v)=>{thread=th;t.value=v;},update:updateMenu,pick,names:()=>items.map((c)=>c.name).join('|'),menu,t,prov:(c)=>{provCmds=c;}};", ctx);
 const { md, body, collapse } = ctx;
 
 // extension.js only touches `vscode` inside functions, so an empty stub is enough to load it.
@@ -129,5 +133,32 @@ assert.deepStrictEqual(shape(collapse([a(undefined, "s"), a(undefined, "t")])), 
 assert.deepStrictEqual(shape(collapse([])), []);
 // A user message sent mid-run stays in place; the fold still sits right before the run's last reply.
 assert.deepStrictEqual(shape(collapse([u("r", "q"), a("r", "x"), u("r", "more"), a("r", "y")])), ["q", "more", "fold:x", "y"]);
+
+// The / menu: built-ins first, then provider commands; prefix matches before substring matches.
+{
+  const S = ctx.slash;
+  S.prov([{ name: "compact", desc: "" }, { name: "clear", desc: "dup" }, { name: "recap", desc: "" }]);
+  S.set("th", "/c");
+  S.update();
+  assert.strictEqual(S.names(), "clear|compact|recap");
+  assert.strictEqual(S.menu.hidden, false);
+  S.pick(1);
+  assert.strictEqual(S.t.value, "/compact ");
+  assert.strictEqual(S.menu.hidden, true); // a space closes the menu
+  posted.length = 0;
+  S.set("th", "/cl");
+  S.update();
+  S.pick(0); // /clear sends nothing, only marks the next message
+  assert.strictEqual(JSON.stringify(posted), JSON.stringify([{ fresh: true }]));
+  assert.strictEqual(S.t.value, "");
+  posted.length = 0;
+  S.set("th", "/settle");
+  S.update();
+  S.pick(0); // /settle settles the open thread, sends no text
+  assert.strictEqual(JSON.stringify(posted), JSON.stringify([{ settle: true }]));
+  S.set("", "/c");
+  S.update();
+  assert.strictEqual(S.menu.hidden, true); // no thread, no menu
+}
 
 console.log("chat_check ok");

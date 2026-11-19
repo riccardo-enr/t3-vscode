@@ -265,7 +265,8 @@ class T3Client extends EventEmitter {
     return this.request("orchestration.dispatchCommand", { type, commandId: crypto.randomUUID(), ...fields });
   }
   // Send as the user (the CLI's send is stored as an agent message). A busy thread gets it as its next turn.
-  send(threadId, text) {
+  // fresh: start a new provider session (the app's /clear); earlier messages stay visible.
+  send(threadId, text, fresh) {
     const t = this.threads.get(threadId);
     const busy = t && (t.activityRunStatus === "running" || !!t.activeRunId);
     return this.command("message.dispatch", {
@@ -275,6 +276,7 @@ class T3Client extends EventEmitter {
       creationSource: "web",
       text,
       attachments: [],
+      ...(fresh ? { freshContext: true } : {}),
       dispatchMode: { type: busy ? "queue_after_active" : "start_immediately" },
     });
   }

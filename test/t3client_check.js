@@ -26,12 +26,14 @@ assert.strictEqual(applyShell(s, { kind: "other" }), false);
 
 assert.deepStrictEqual([0, 1, 2, 5, 9].map(backoff), [1000, 2000, 4000, 30000, 30000]);
 
-// send: as the user; a busy thread queues.
+// send: freshContext (the app's /clear) only when asked; a busy thread queues.
 {
   const c = Object.create(T3Client.prototype);
   c.threads = new Map([["a", th("a", { activityRunStatus: "running" })]]);
   c.request = (_, p) => p;
-  const p = c.send("a", "hi");
+  assert.strictEqual("freshContext" in c.send("a", "hi"), false);
+  const p = c.send("a", "hi", true);
+  assert.strictEqual(p.freshContext, true);
   assert.strictEqual(p.createdBy, "user");
   assert.strictEqual(p.dispatchMode.type, "queue_after_active");
 }

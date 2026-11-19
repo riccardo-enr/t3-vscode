@@ -413,6 +413,7 @@ class Chat {
     this.last = "";
     this.status = "";
     this.msgs = undefined; // messages of this.thread; undefined until its snapshot arrives
+    this.fresh = new Set(); // thread ids whose next message starts a fresh session (/clear)
   }
   dispose() {
     if (this.unwatch) this.unwatch();
@@ -428,8 +429,24 @@ class Chat {
       if (m.url) return /^https?:\/\//.test(m.url) && vscode.env.openExternal(vscode.Uri.parse(m.url));
       if (typeof m.copy === "string") return vscode.env.clipboard.writeText(m.copy);
       if (m.openInApp) return openThread(this.thread);
+      // The / menu: the provider commands of the open thread's provider (Claude lists its skills here too).
+      if (m.slash) {
+        let commands = [];
+        try {
+          const raw = this.thread && client.threads.get(this.thread.threadId);
+          const id = raw && raw.modelSelection && raw.modelSelection.instanceId;
+          const p = ((await client.getConfig()).providers || []).find((x) => x.instanceId === id);
+          commands = ((p && p.slashCommands) || []).map((c) => ({ name: c.name, desc: c.description || (c.input && c.input.hint) || "" }));
+        } catch (e) { } // offline: the menu keeps the built-in commands
+        return view.webview.postMessage({ commands });
+      }
+      if (typeof m.fresh === "boolean" && this.thread) {
+        this.fresh[m.fresh ? "add" : "delete"](this.thread.threadId);
+        return this.render();
+      }
       if (m.settle) return threadAction("settle", this.thread, this);
-      if (m.pickModel) return client.state === "connected" ? pickModel(this.thread, () => this.render()) : openThread(this.thread);
+      if (m.pickModel || m.pickEffort)
+        return client.state === "connected" ? pickModel(this.thread, () => this.render(), !!m.pickEffort) : openThread(this.thread);
       if (typeof m.image === "string") {
         try {
           view.webview.postMessage({ imagePath: saveImage(m.image) });
@@ -444,7 +461,9 @@ class Chat {
       try {
         // The reference is built here from the tracked editor, never from webview input.
         const text = m.ctx === true && this.ctx ? m.text + "\n\n" + ctxRef(this.ctx) : m.text;
-        await client.send(this.thread.threadId, text);
+        const id = this.thread.threadId;
+        await client.send(id, text, this.fresh.has(id));
+        this.fresh.delete(id);
         view.webview.postMessage({ sent: true });
         this.jump = true;
       } catch (e) {
@@ -543,7 +562,7 @@ class Chat {
     if (this.status && t.status && this.status !== t.status && this.onStatus) this.onStatus(); // tree icons, badges
     this.status = t.status || "";
     this.setWorktree(t.worktreePath);
-    const head = { threadId: id, status: t.status, model: t.model, modelName: modelLabel(id, t.model) };
+    const head = { threadId: id, status: t.status, model: t.model, modelName: modelLabel(id, t.model), fresh: this.fresh.has(id) };
     if (!this.msgs) {
       if (this.last === "loading") return;
       this.last = "loading";
@@ -609,9 +628,10 @@ function chatHtml(webview, media) {
 <div id="empty" hidden><div class="logo"></div><div id="emptytxt">Pick a thread in the Threads view to see its chat here.</div></div>
 <div id="skel" aria-hidden="true"><i></i><i></i><i></i></div>
 <button id="ask" hidden></button>
+<button id="fresh" hidden>Your next message starts a fresh session. Click to keep the current session</button>
 <div id="work" hidden><i></i><i></i><i></i><span>Working</span></div>
 </div>
-<div id="bar"><textarea id="t" rows="1" aria-label="Message" placeholder="Message the agent"></textarea>
+<div id="bar"><div id="menu" role="listbox" aria-label="Commands" hidden></div><textarea id="t" rows="1" aria-label="Message" placeholder="Message the agent"></textarea>
 <div id="row"><span id="model" role="button" tabindex="0" title="Model and effort of this thread. Click to change them"></span><button id="ctx" hidden><span id="ctxl"></span><span aria-hidden="true">x</span></button><button id="b" title="Send (Enter)">Send</button></div></div>
 <script nonce="${nonce}" src="${js}"></script></body></html>`;
 }
@@ -667,7 +687,8 @@ function modelLabel(threadId, model) {
 
 // Quick pick of every enabled provider's models, then that model's effort levels.
 // ponytail: other model options (service tier, ...) are dropped on change; add them to the picker if missed.
-async function pickModel(thread, done) {
+// effortOnly (/effort): keep the current model, pick only its effort.
+async function pickModel(thread, done, effortOnly) {
   const raw = thread && client.threads.get(thread.threadId);
   if (!raw || !raw.modelSelection) return vscode.window.showWarningMessage("T3 Code: this thread is not in the live list yet.");
   const cur = raw.modelSelection;
@@ -690,10 +711,13 @@ async function pickModel(thread, done) {
       items.push({ label: m.name || m.slug, description: now ? m.slug + "  (current)" : m.slug, m, p });
     }
   }
-  const model = await vscode.window.showQuickPick(items, { placeHolder: `Model for "${thread.title || thread.threadId}"`, matchOnDescription: true });
-  if (!model) return;
+  const model = effortOnly
+    ? items.find((i) => i.m && i.p.instanceId === cur.instanceId && i.m.slug === cur.model)
+    : await vscode.window.showQuickPick(items, { placeHolder: `Model for "${thread.title || thread.threadId}"`, matchOnDescription: true });
+  if (!model) return effortOnly && vscode.window.showWarningMessage("T3 Code: the current model is not in the server's list.");
   const same = model.p.instanceId === cur.instanceId;
   const desc = ((model.m.capabilities && model.m.capabilities.optionDescriptors) || []).find((d) => /effort/i.test(d.id) && d.type === "select");
+  if (effortOnly && !desc) return vscode.window.showInformationMessage(`T3 Code: ${model.label} has no effort setting.`);
   const options = [];
   if (desc) {
     const now = same && (cur.options || []).find((o) => o.id === desc.id);

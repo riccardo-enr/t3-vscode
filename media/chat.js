@@ -5,6 +5,8 @@ const st = document.getElementById("st");
 const work = document.getElementById("work");
 const ask = document.getElementById("ask");
 ask.onclick = () => vs.postMessage({ openInApp: true });
+const freshEl = document.getElementById("fresh");
+freshEl.onclick = () => vs.postMessage({ fresh: false });
 const t = document.getElementById("t");
 const btn = document.getElementById("b");
 const modelEl = document.getElementById("model");
@@ -204,6 +206,7 @@ function header(d) {
   // The CLI exposes only the count of pending questions or approvals, not their text, so answer in the app.
   ask.hidden = !d.ask;
   ask.textContent = d.ask ? `Waiting for your answer (${d.ask}). Click to answer in T3 Code` : "";
+  freshEl.hidden = !d.fresh;
 }
 function render(d) {
   switchTo(d.threadId);
@@ -242,6 +245,7 @@ function lock(on) {
 function send() {
   const x = t.value.trim();
   if (!x || btn.disabled) return;
+  if (thread && x[0] === "/" && runBuiltin(x.slice(1).toLowerCase())) return;
   lock(true);
   if (thread) {
     pend = { node: node({ role: "user", text: x }, true), after: count };
@@ -279,7 +283,82 @@ modelEl.onkeydown = (e) => {
     vs.postMessage({ pickModel: true });
   }
 };
-t.oninput = grow;
+// ---- slash commands ----
+// App commands send nothing: /clear marks the next message as a fresh session, /model opens the picker.
+// Provider commands (/compact, /review, skills) go through as text, as the app does.
+const BUILTIN = [
+  { name: "clear", desc: "Start a fresh session; earlier messages stay visible", msg: { fresh: true } },
+  { name: "model", desc: "Switch response model for this thread", msg: { pickModel: true } },
+  { name: "effort", desc: "Change the reasoning effort of the current model", msg: { pickEffort: true } },
+  { name: "settle", desc: "Settle this thread (hides it from the list)", msg: { settle: true } },
+];
+const menu = document.getElementById("menu");
+let provCmds = [], items = [], sel = 0, muted = false, fetchedFor = null;
+function runBuiltin(name) {
+  const b = BUILTIN.find((c) => c.name === name);
+  if (!b) return false;
+  vs.postMessage(b.msg);
+  t.value = "";
+  grow();
+  updateMenu();
+  return true;
+}
+// The menu shows while the box holds only "/word" (no space yet) and a thread is open.
+function updateMenu() {
+  const m = thread && /^\/(\S*)$/.exec(t.value);
+  if (!m) muted = false;
+  if (!m || muted) return (menu.hidden = true);
+  const q = m[1].toLowerCase();
+  const all = BUILTIN.concat(provCmds.filter((c) => !BUILTIN.some((b) => b.name === c.name)));
+  items = all
+    .filter((c) => c.name.toLowerCase().includes(q))
+    .sort((a, b) => !a.name.toLowerCase().startsWith(q) - !b.name.toLowerCase().startsWith(q))
+    .slice(0, 60);
+  sel = Math.min(sel, Math.max(items.length - 1, 0));
+  menu.replaceChildren(
+    ...items.map((c, i) => {
+      const d = el("div", i === sel ? "sel" : "");
+      d.setAttribute("role", "option");
+      d.setAttribute("aria-selected", i === sel);
+      d.append(el("span", "name", "/" + c.name), el("span", "desc", c.desc));
+      d.onmousedown = (e) => (e.preventDefault(), pick(i));
+      return d;
+    })
+  );
+  menu.hidden = !items.length;
+  if (menu.children[sel]) menu.children[sel].scrollIntoView({ block: "nearest" });
+}
+function pick(i) {
+  const c = items[i];
+  if (!c || runBuiltin(c.name)) return;
+  t.value = "/" + c.name + " ";
+  t.selectionStart = t.selectionEnd = t.value.length;
+  grow();
+  updateMenu();
+  t.focus();
+}
+// Returns true when the key was used by the menu.
+function menuKey(e) {
+  if (menu.hidden || !items.length) return false;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") sel = (sel + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+  else if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") pick(sel);
+  else if (e.key === "Escape") (muted = true), (menu.hidden = true);
+  else return false;
+  e.preventDefault();
+  if (!menu.hidden) updateMenu();
+  return true;
+}
+t.oninput = () => {
+  grow();
+  sel = 0;
+  // Ask for the provider's list when a "/" is typed first, and after a thread switch (the provider may differ).
+  if (thread && /^\/\S*$/.test(t.value) && (t.value === "/" || fetchedFor !== thread)) {
+    fetchedFor = thread;
+    vs.postMessage({ slash: true });
+  }
+  updateMenu();
+};
+t.onblur = () => (menu.hidden = true);
 // A pasted image is saved to a file by the extension; its path goes into the message (the CLI has no attachments).
 t.onpaste = (e) => {
   const f = [...((e.clipboardData && e.clipboardData.files) || [])].find((x) => x.type.startsWith("image/"));
@@ -297,6 +376,7 @@ function insert(s) {
   t.focus();
 }
 t.onkeydown = (e) => {
+  if (menuKey(e) || e.isComposing) return;
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
     e.preventDefault();
     send();
@@ -309,6 +389,11 @@ addEventListener("message", (e) => {
   if (d.empty) { switchTo(""); emptyTxt.textContent = PICK; mode("empty"); st.textContent = ""; modelEl.textContent = ""; work.hidden = true; return; }
   if (d.loading) { switchTo(d.threadId); mode(log.children.length ? "" : "loading"); header(d); return; }
   if (d.imagePath) return insert(d.imagePath);
+  if (Array.isArray(d.commands)) {
+    provCmds = d.commands;
+    if (document.activeElement === t) updateMenu();
+    return;
+  }
   if (typeof d.ctx === "string") {
     if (d.ctx !== ctxL.textContent) ctxOff(false);
     ctxL.textContent = d.ctx;
