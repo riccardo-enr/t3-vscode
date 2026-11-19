@@ -750,3 +750,9 @@ textarea:disabled {
    color: var(--vscode-foreground);
    background: none
 }
+
+#thumbs { display: flex; flex-wrap: wrap; gap: 6px; }
+#thumbs:not(:empty) { padding: 6px 0; }
+.thumb { position: relative; }
+.thumb img { display: block; max-height: 64px; max-width: 120px; border-radius: 4px; border: 1px solid var(--vscode-widget-border, #8884); }
+.thumb button { position: absolute; top: -4px; right: -4px; width: 16px; height: 16px; padding: 0; line-height: 14px; border-radius: 50%; cursor: pointer; border: 1px solid var(--vscode-widget-border, #8884); background: var(--vscode-editor-background); color: var(--vscode-foreground); }

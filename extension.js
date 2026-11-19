@@ -721,7 +721,7 @@ function chatHtml(webview, media) {
   const css = webview.asWebviewUri(vscode.Uri.joinPath(media, "chat.css")).with({ query: "v=" + nonce });
   const js = webview.asWebviewUri(vscode.Uri.joinPath(media, "chat.js")).with({ query: "v=" + nonce });
   return `<!doctype html><html><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; img-src data:; script-src 'nonce-${nonce}';">
 <link rel="stylesheet" href="${css}"></head><body>
 <div id="st" role="status"></div>
 <div id="main">
@@ -730,10 +730,9 @@ function chatHtml(webview, media) {
 <div id="skel" aria-hidden="true"><i></i><i></i><i></i></div>
 <button id="ask" hidden></button>
 <div id="card" hidden></div>
-<button id="fresh" hidden>Your next message starts a fresh session. Click to keep the current session</button>
 <div id="work" hidden><i></i><i></i><i></i><span>Working</span></div>
 </div>
-<div id="bar"><div id="cites"></div><div id="menu" role="listbox" aria-label="Commands" hidden></div><textarea id="t" rows="1" aria-label="Message" placeholder="Message the agent"></textarea>
+<div id="bar"><div id="cites"></div><div id="thumbs"></div><div id="menu" role="listbox" aria-label="Commands" hidden></div><textarea id="t" rows="1" aria-label="Message" placeholder="Message the agent"></textarea>
 <div id="row"><span id="model" role="button" tabindex="0" title="Model and effort of this thread. Click to change them"></span><button id="ctx" hidden><span id="ctxl"></span><span aria-hidden="true">x</span></button><button id="b" title="Send (Enter)">Send</button></div></div>
 <script nonce="${nonce}" src="${js}"></script></body></html>`;
 }

@@ -522,12 +522,22 @@ t.oninput = () => {
 };
 t.onblur = () => (menu.hidden = true);
 // A pasted image is saved to a file by the extension; its path goes into the message (the CLI has no attachments).
+const waiting = [], thumbsEl = document.getElementById("thumbs");
+function addThumb(path) {
+  const box = el("div", "thumb"), img = document.createElement("img"), x = el("button", null, "x");
+  img.src = waiting.shift() || "";
+  img.title = path;
+  x.title = "Remove this image";
+  x.onclick = () => { t.value = t.value.replace(path, "").replace(/ {2,}/g, " "); box.remove(); grow(); };
+  box.append(img, x);
+  thumbsEl.append(box);
+}
 t.onpaste = (e) => {
   const f = [...((e.clipboardData && e.clipboardData.files) || [])].find((x) => x.type.startsWith("image/"));
   if (!f) return;
   e.preventDefault();
   const r = new FileReader();
-  r.onload = () => vs.postMessage({ image: r.result });
+  r.onload = () => { waiting.push(r.result); vs.postMessage({ image: r.result }); };
   r.readAsDataURL(f);
 };
 function insert(s) {
@@ -567,10 +577,11 @@ addEventListener("message", (e) => {
     ctxEl.hidden = false;
     return;
   }
-  if (d.imageError) { st.className = "err"; st.textContent = "image not saved: " + d.imageError; return; }
+  if (d.imageError) { waiting.shift(); st.className = "err"; st.textContent = "image not saved: " + d.imageError; return; }
   if (d.sent) {
     if (pend) pend.node.classList.remove("pending");
     t.value = "";
+    thumbsEl.replaceChildren();
     cites.length = 0;
     drawCites();
     grow();
