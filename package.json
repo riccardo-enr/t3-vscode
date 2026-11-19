@@ -1,15 +1,15 @@
 {
   "name": "t3-vscode",
   "displayName": "T3 Code Bridge",
-  "description": "Send editor context to T3 Code and list its threads in a sidebar.",
+  "description": "A VS Code client for the T3 Code server: threads, live chat and an agent dashboard.",
   "version": "0.0.2",
   "publisher": "local",
   "license": "MIT",
-  "engines": { "vscode": "^1.85.0" },
+  "engines": { "vscode": "^1.101.0" },
   "main": "./extension.js",
   "extensionKind": ["workspace"],
   "capabilities": {
-    "untrustedWorkspaces": { "supported": false, "description": "Runs the t3 CLI and git in the workspace." }
+    "untrustedWorkspaces": { "supported": false, "description": "Runs git in the workspace and sends messages to the T3 server." }
   },
   "activationEvents": ["onStartupFinished"],
   "contributes": {
@@ -17,6 +17,7 @@
       { "command": "t3code.sendSelection", "title": "T3 Code: Send selection (draft)" },
       { "command": "t3code.sendToThread", "title": "T3 Code: Send selection to thread" },
       { "command": "t3code.newThread", "title": "T3 Code: New thread", "icon": "$(add)" },
+      { "command": "t3code.connect", "title": "T3 Code: Connect to server" },
       { "command": "t3code.refresh", "title": "T3 Code: Refresh threads", "icon": "$(refresh)" },
       { "command": "t3code.openThread", "title": "T3 Code: Open in T3 Code app" },
       { "command": "t3code.openChat", "title": "T3 Code: Open chat" },
@@ -67,7 +68,8 @@
         { "command": "t3code.chatOpenInApp", "when": "view == t3code.chat", "group": "navigation@2" },
         { "command": "t3code.showTurnChanges", "when": "view == t3code.chat", "group": "navigation@3" },
         { "command": "t3code.openWorktree", "when": "view == t3code.chat && t3code.chatWorktree", "group": "navigation@4" },
-        { "command": "t3code.stopThread", "when": "view == t3code.chat", "group": "navigation@5" }
+        { "command": "t3code.stopThread", "when": "view == t3code.chat", "group": "navigation@5" },
+        { "command": "t3code.settleThread", "when": "view == t3code.chat", "group": "navigation@6" }
       ],
       "view/item/context": [
         { "command": "t3code.openThread", "when": "view == t3code.threads && viewItem =~ /^thread/" },

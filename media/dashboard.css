@@ -19,5 +19,6 @@ button:hover{background:var(--vscode-button-secondaryHoverBackground)}
 .title{flex:1;font-weight:600;cursor:pointer;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .badge{font-size:11px;padding:1px 7px;border-radius:9px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground)}
 .meta{margin-top:3px;font-size:11px}
+.snip{margin-top:4px;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .acts{margin-top:8px;display:flex;gap:6px}
 .acts button{padding:1px 9px;font-size:11px}

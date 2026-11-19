@@ -1,45 +1,12 @@
 // Usage data for the dashboard panel. No `vscode` import, so test/usage_check.js can load it.
-// Talks to the running T3 server the way the desktop dashboard does: a 5-minute read-only token from
-// the CLI, a one-time websocket ticket, then RPCs over one /ws connection:
+// Two RPCs on the shared T3 connection (t3Client.js), the way the desktop dashboard reads them:
 //   server.getUsageSummary (cost and tokens) and server.getConfig (provider limits).
 // ponytail: internal API (contractVersion 6); if T3 changes it the panel shows the error, update then.
-const { execFile } = require("child_process");
-const fs = require("fs");
-const os = require("os");
-const path = require("path");
-
 const day = (d) => d.toLocaleDateString("en-CA"); // YYYY-MM-DD in the local zone
 const NAMES = { claudeAgent: "Claude", claude: "Claude", codex: "Codex", opencode: "OpenCode", antigravity: "Antigravity", cursor: "Cursor", grok: "Grok", pi: "Pi", muse: "Muse" };
 
-function origin() {
-  const home = process.env.T3CODE_HOME || path.join(os.homedir(), ".t3");
-  return JSON.parse(fs.readFileSync(path.join(home, "userdata", "server-runtime.json"), "utf8")).origin;
-}
-
-function token() {
-  return new Promise((resolve, reject) => {
-    execFile(
-      "t3",
-      ["auth", "session", "issue", "--scope", "diagnostics:read", "--scope", "orchestration:read", "--ttl", "5m", "--label", "vscode-usage", "--token-only"],
-      { timeout: 15000 },
-      (err, out, stderr) => {
-        if (err) return reject(new Error(err.code === "ENOENT" ? "t3 not found on PATH" : (stderr || err.message).trim()));
-        resolve(out.trim().split("\n").pop()); // the CLI may print shell noise first; the token is last
-      }
-    );
-  });
-}
-
-// Resolves with {summary, config, since, until}.
-async function fetchUsage(days) {
-  const base = origin();
-  const res = await fetch(base + "/api/auth/websocket-ticket", {
-    method: "POST",
-    headers: { authorization: "Bearer " + (await token()), "content-type": "application/json" },
-    body: "{}",
-  });
-  if (!res.ok) throw new Error("T3 refused the ticket request (" + res.status + ")");
-  const { ticket } = await res.json();
+// Resolves with {summary, config, since, until}. client: a connected T3Client.
+async function fetchUsage(client, days) {
   const until = new Date();
   const since = new Date(until.getTime() - (days - 1) * 864e5);
   const summaryIn = {
@@ -48,25 +15,17 @@ async function fetchUsage(days) {
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     awaitRefresh: true,
   };
-  return new Promise((resolve, reject) => {
-    const ws = new WebSocket(base.replace(/^http/, "ws") + `/ws?orchestrationProtocol=2&wsTicket=${encodeURIComponent(ticket)}`);
-    const out = { since: summaryIn.sinceDay, until: summaryIn.untilDay };
-    const timer = setTimeout(() => (ws.close(), reject(new Error("usage scan timed out"))), 90000);
-    const fail = (e) => (clearTimeout(timer), ws.close(), reject(e));
-    ws.onopen = () => {
-      const send = (id, tag, payload) => ws.send(JSON.stringify({ _tag: "Request", id, tag, payload, headers: [] }));
-      send("1", "server.getUsageSummary", summaryIn);
-      send("2", "server.getConfig", {});
-    };
-    ws.onerror = () => fail(new Error("could not connect to the T3 server"));
-    ws.onmessage = (e) => {
-      const m = JSON.parse(String(e.data));
-      if (m._tag !== "Exit") return;
-      if (m.exit._tag !== "Success") return fail(new Error("usage read failed: " + JSON.stringify(m.exit.cause || m.exit).slice(0, 200)));
-      out[m.requestId === "1" ? "summary" : "config"] = m.exit.value;
-      if (out.summary && out.config) (clearTimeout(timer), ws.close(), resolve(out));
-    };
-  });
+  let timer;
+  const late = new Promise((_, reject) => (timer = setTimeout(() => reject(new Error("usage scan timed out")), 90000)));
+  try {
+    const [summary, config] = await Promise.race([
+      Promise.all([client.request("server.getUsageSummary", summaryIn), client.request("server.getConfig", {})]),
+      late,
+    ]);
+    return { summary, config, since: summaryIn.sinceDay, until: summaryIn.untilDay };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // Aggregate buckets (optionally one provider). Every day in the window appears, even with no spend.

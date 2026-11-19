@@ -2,7 +2,7 @@
 
 > See every T3 Code thread of your workspace, chat with it, and send code to it &mdash; without leaving the editor.
 
-A small, open-source VS Code extension that talks to [T3 Code](https://t3.codes) through the `t3` CLI. Plain JavaScript, no build step, no dependencies.
+A small, open-source VS Code client for the [T3 Code](https://t3.codes) server: one live WebSocket, no CLI. Plain JavaScript, no build step, no dependencies.
 
 Agents run in the background, finish while you are reading a diff, or sit waiting for an answer. The T3 Code app shows them, but it is another window. This extension puts the threads, their chat and their file changes next to the code they are about.
 
@@ -14,8 +14,9 @@ Agents run in the background, finish while you are reading a diff, or sit waitin
 
 1. **Run T3 Code** &mdash; the desktop app must be running, with your workspace folder added as a project.
 2. **Install the extension** &mdash; see [Install](#install).
-3. **Open the view** &mdash; click the **T3 Code** icon in the activity bar. Your open threads are listed, child agents nested under the thread that started them.
-4. **Click a thread** &mdash; its history opens in the Chat view below. Type to reply.
+3. **Pair once** &mdash; run `t3 auth pairing create` in a terminal, then **`T3 Code: Connect to server`** in VS Code and paste the 12-character code. The extension trades it for a 30-day login kept in VS Code's secret storage (your OS keyring), limited to the `orchestration:read`, `orchestration:operate` and `diagnostics:read` scopes. When it expires or you revoke it, the status bar shows **T3: connect**: pair again.
+4. **Open the view** &mdash; click the **T3 Code** icon in the activity bar. Your open threads are listed, child agents nested under the thread that started them.
+5. **Click a thread** &mdash; its history opens in the Chat view below. Type to reply; your messages are sent as you, not as an agent.
 
 # Know What Your Agents Are Doing &mdash; Threads and Status
 
@@ -23,7 +24,7 @@ Which agent is running, which one is waiting for you, which one failed? One glan
 
 - **Live status icons** &mdash; spinning while running, a bell when waiting for you, a check when completed, an error mark when failed, pause when interrupted, a slash when cancelled.
 - **Parents and children** &mdash; child agent threads are nested under the thread that started them. Settled and snoozed threads are hidden.
-- **Status bar** &mdash; how many threads of the workspace are running. Click it to show the view.
+- **Status bar** &mdash; how many threads of the workspace are running. Click it to show the view. When not connected it says why: **T3: connect** (not paired; click to pair), a spinner (connecting), or a disconnect icon (server not reachable; click to retry now).
 - **Finish notifications** &mdash; when a thread completes, fails, is interrupted or is cancelled, a notification offers **Open chat**.
 - **Right-click a thread** &mdash; open it in the T3 Code app, send the current selection to it, or show the changes of its last turn.
 
@@ -36,7 +37,8 @@ Read the whole history and reply without switching windows.
 - **Links that work** &mdash; file links and path-like code spans (`src/foo.js:42`) open in a VS Code editor at that line. Web links open in the browser.
 - **Open-file chip** &mdash; shows the active file and selected lines (`extension.js:120-140`). When on, a send adds the file's absolute path and line range (not the code). Click the chip to leave it out.
 - **Paste images** &mdash; Ctrl+V saves the image under `/tmp/t3-vscode-images/` and inserts its path.
-- **Model badge** &mdash; shows model and effort; click it to pick any model of an enabled provider (Claude, Codex, ...) and its effort level; another provider's model switches the thread to it (needs the live connection; without it the click opens the app).
+- **Live replies** &mdash; text appears as the agent writes it, pushed by the server.
+- **Model badge** &mdash; shows model and effort; click it to pick any model of an enabled provider (Claude, Codex, ...) and its effort level; another provider's model switches the thread to it.
 - **Title-bar buttons** &mdash; refresh, open in the app, show the last turn's changes, and open the worktree in Source Control for threads that run in one.
 
 # Send Code to an Agent &mdash; Editor Commands
@@ -75,11 +77,14 @@ Change them in Keyboard Shortcuts (search for "T3 Code").
 
 # Requirements
 
-- The T3 Code desktop app, running, with the workspace folder added as a T3 Code project.
-- The `t3` CLI on your `PATH`, version 0.1.10 or later (`t3 --version`).
-- VS Code 1.85 or later.
-- A trusted workspace (the extension is disabled in Restricted Mode, since it runs `t3` and `git`).
-  In remote windows it runs on the remote side, next to the `t3` CLI.
+- The T3 Code server (desktop app or `t3 serve`) running on this machine, version 0.1.10, with the workspace
+  folder added as a T3 Code project. The extension finds it through `$T3CODE_HOME/userdata/server-runtime.json`
+  (default `~/.t3`).
+- A pairing code once (`t3 auth pairing create`, see [Getting Started](#getting-started)). The extension
+  itself never runs `t3`.
+- VS Code 1.101 or later (its Node has a global `WebSocket`).
+- A trusted workspace (the extension is disabled in Restricted Mode, since it runs `git` and sends messages).
+  In remote windows it runs on the remote side, next to the T3 server.
 - Opening links in the app uses `xdg-open` on Linux. On macOS, Windows and remote windows it uses
   VS Code's `openExternal`, which is less tested.
 
@@ -99,47 +104,40 @@ ln -s $HOME/code/t3-vscode ~/.vscode/extensions/local.t3-vscode
 
 # How it works
 
-| What | `t3` command |
+The extension keeps one WebSocket open to the local T3 server ([t3Client.js](t3Client.js)) and
+nothing else talks to T3. Every change is pushed by the server; nothing polls.
+
+| What | Over the connection |
 | --- | --- |
-| Thread list | `t3 thread list --project <workspace> --json` |
-| Chat history | `t3 thread show --messages 1000 --json <thread>` |
-| Sending a message | `t3 thread send <thread> -` (message on stdin) |
+| Login | `POST /oauth/token` once (pairing code -> 30-day bearer), then `POST /api/auth/websocket-ticket` per connect |
+| Thread list, status bar, notifications | `orchestration.subscribeShell` (snapshot, then pushed changes) |
+| Chat history | `orchestration.subscribeThread` (snapshot, then `message.updated` events) |
+| Sending a message | `message.dispatch` with `createdBy: "user"` |
+| New thread | `orchestration.launchThread` (model and modes of the project's newest thread) |
+| Stop, settle, model and effort | `thread.stop`, `thread.settle`, `thread.model-selection.set` |
+| Usage dashboard | `server.getUsageSummary`, `server.getConfig` |
 | Draft from selection | `t3code://new?prompt=...&repo=...` deep link |
 | Open in app | `t3code://threads/<environment>/<thread>` deep link |
-| Status bar, notifications | `t3 thread list` every 15 s (skipped if the tree just listed) |
 | Last turn changes | `git diff` / `git show` on T3's checkpoint refs |
 
-The chat polls for updates. It polls every second while the thread is running, or for 30 seconds
-after you open a thread or send a message. Otherwise it polls every 10 seconds. It never polls
-while the view is hidden. Each `t3` call costs about one second of CPU, which is why it does not
-poll faster.
+The connection reconnects by itself (1 s, doubling to 30 s) and re-reads `server-runtime.json` each
+time, so a server restart on a new port is picked up. While not connected, the tree, chat and
+dashboard show the reason, and sends and actions are refused with it. The protocol is internal to T3;
+it was read from server 0.1.10 and may change in a T3 update.
 
-Before each timed poll the extension checks the modification time of T3's state database
-(`$T3CODE_HOME/userdata/statev2.sqlite-wal`, default `~/.t3`). If it has not changed since the last
-good poll, the `t3` call is skipped. Opening a thread, sending, or refreshing always polls. The file
-changes every few seconds while any T3 thread runs, so this saves CPU mainly when T3 is idle.
+# Agent dashboard
 
-# Live connection and agent dashboard
-
-The extension keeps one WebSocket open to the local T3 server ([t3Client.js](t3Client.js)). It mints a
-5-minute token with `t3 auth session issue` (scopes `orchestration:read`, `orchestration:operate`,
-`diagnostics:read`) on each connect, then subscribes to the thread list. While connected:
-
-- The Threads tree and the status bar update when the server pushes a change. The 15 s `t3` poll is off.
-- **T3 Code: Open agent dashboard** shows one card per thread, sorted: waiting for you, running, failed, rest.
-  Sub-agents nest under their parent. Cards have Open chat, Open in app, Stop and Settle.
-- **Stop thread** (tree inline button, chat title bar) and **Settle thread** (tree context menu) use
-  commands the CLI does not have.
-
-If the connection fails, the old CLI polling path runs unchanged (it also needs the server, so it does not
-help when the server is down). The protocol is internal to T3; tags were read from server 0.1.10.
-The chat view still polls; approval text and the model picker are not done yet.
+**T3 Code: Open agent dashboard** shows one card per thread, sorted: waiting for you, running, failed,
+rest. Sub-agents nest under their parent. Running and waiting cards show their last message. Cards have
+Open chat, Open in app, Changes (last turn's diff), Stop and Settle.
+**Stop thread** (tree inline button, chat title bar) and **Settle thread** (tree context menu, chat title bar) work the same.
 
 # Limits
 
-- The sidebar covers the current workspace only (`t3 thread list` is per project, and the CLI has
-  no command to list projects).
-- No live streaming: replies appear on the next poll.
+- The sidebar covers the first workspace folder only.
+- **New thread** needs the folder to be a T3 Code project already, and one thread in it to copy the model from
+  (or a project default model). Otherwise start the first thread in the app.
+- Approvals and questions show only "waiting for your answer"; answer them in the app.
 - Subagents started inside a turn (not as T3 threads) do not appear in the tree.
 - **Last turn changes and the "T3" file badges rely on T3 internals.** They read the git refs T3
   keeps per turn (`refs/t3/orchestration-v2/checkpoints/<hash of thread id>/ordinal/<N>`), which
@@ -150,15 +148,18 @@ The chat view still polls; approval text and the model picker are not done yet.
 # Development
 
 ```sh
-node --check extension.js && node --check media/chat.js
-node test/chat_check.js   # markdown, escaping, citation, file-link, state stamp and checkpoint-ref checks
+node --check extension.js && node --check t3Client.js && node --check media/chat.js
+node test/chat_check.js       # markdown, escaping, citation, file-link and checkpoint-ref checks
+node test/t3client_check.js   # thread list and message stores, pairing form, connection states
+node test/usage_check.js && node test/dashboard_check.js
 ```
 
 Reload the Extension Development Host window with Ctrl+R after a change.
 
 Files:
 
-- [extension.js](extension.js): commands, Threads tree, Chat view provider, `t3` CLI calls.
+- [extension.js](extension.js): commands, Threads tree, Chat view provider, status bar.
+- [t3Client.js](t3Client.js): the connection to the T3 server (login, socket, stores, commands).
 - [media/chat.js](media/chat.js), [media/chat.css](media/chat.css): the Chat webview (strict CSP,
   all message text escaped before rendering).
 - [package.json](package.json): views, commands, menus.

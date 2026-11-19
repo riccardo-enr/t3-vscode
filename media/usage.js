@@ -76,9 +76,10 @@ function drawLimits(limits) {
         const ms = Date.parse(w.resetsAt) - now;
         chip = "resets in " + left(ms);
         if (w.durationMins) {
-          // Tick = how far through the window we are; a fill ending right of it means you are under pace.
+          // The fill shows quota left, so the tick shows time left: where the fill would end at an even pace.
+          // A fill ending right of the tick means you are under pace.
           const tick = el("div", "tick");
-          tick.style.left = Math.min(100, Math.max(0, (1 - ms / (w.durationMins * 6e4)) * 100)) + "%";
+          tick.style.left = Math.min(100, Math.max(0, (ms / (w.durationMins * 6e4)) * 100)) + "%";
           track.append(tick);
         }
       }

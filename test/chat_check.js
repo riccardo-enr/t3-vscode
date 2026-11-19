@@ -25,7 +25,7 @@ const { md, body, collapse } = ctx;
 // extension.js only touches `vscode` inside functions, so an empty stub is enough to load it.
 const Module = require("module"), load = Module._load;
 Module._load = (req, ...a) => (req === "vscode" ? {} : load(req, ...a));
-const { prettyModel, ago, stateStamp, checkpointScope, saveImage, selLines, ctxLabel, ctxRef } = require("../extension.js");
+const { prettyModel, ago, checkpointScope, saveImage, selLines, ctxLabel, ctxRef } = require("../extension.js");
 Module._load = load;
 
 // Pasted images: saved with the right extension and bytes; other types and junk are refused.
@@ -63,24 +63,6 @@ assert.strictEqual(prettyModel(undefined), "");
 
 // Checkpoint ref scope: value read from real refs in a T3 project repo (2026-11-18).
 assert.strictEqual(checkpointScope("35a78732-e5e2-4256-986f-33c7c0c8584c"), "MjQyMWFiNDJkMDk3Yjg3NTg3NDYwMTc2ZDQ1Yzk5ZDM");
-
-// State stamp: changes when the T3 state file changes; undefined (poll as usual) when it is missing.
-{
-  const os = require("os"), home = fs.mkdtempSync(path.join(os.tmpdir(), "t3home-")), old = process.env.T3CODE_HOME;
-  process.env.T3CODE_HOME = home;
-  assert.strictEqual(stateStamp(), undefined);
-  fs.mkdirSync(path.join(home, "userdata"));
-  const wal = path.join(home, "userdata", "statev2.sqlite-wal");
-  fs.writeFileSync(wal, "");
-  fs.utimesSync(wal, 1000, 1000);
-  const s1 = stateStamp();
-  assert(s1 && s1 === stateStamp());
-  fs.utimesSync(wal, 2000, 2000);
-  assert.notStrictEqual(stateStamp(), s1);
-  fs.rmSync(home, { recursive: true });
-  if (old === undefined) delete process.env.T3CODE_HOME;
-  else process.env.T3CODE_HOME = old;
-}
 
 const now = Date.parse("2026-11-18T12:00:00Z");
 const before = (s) => new Date(now - s * 1000).toISOString();

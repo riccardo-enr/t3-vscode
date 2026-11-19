@@ -23,11 +23,17 @@ function card(c, kid) {
   title.onkeydown = (e) => e.key === "Enter" && title.click();
   top.append(title, el("span", "badge", c.ask ? "waiting for you" : c.status));
   const meta = el("div", "meta dim", [c.model, c.effort, c.when, c.agents && c.agents + " agent" + (c.agents > 1 ? "s" : "")].filter(Boolean).join("  |  "));
+  d.append(top, meta);
+  if (c.snippet) {
+    const s = el("div", "snip", c.snippet);
+    s.title = c.snippet;
+    d.append(s);
+  }
   const acts = el("div", "acts");
-  acts.append(btn("Open chat", "chat", c.id), btn("Open in app", "app", c.id));
+  acts.append(btn("Open chat", "chat", c.id), btn("Open in app", "app", c.id), btn("Changes", "changes", c.id));
   if (c.live) acts.append(btn("Stop", "stop", c.id, true));
   if (c.status !== "running") acts.append(btn("Settle", "settle", c.id));
-  d.append(top, meta, acts);
+  d.append(acts);
   for (const k of c.children || []) d.append(card(k, true));
   return d;
 }
