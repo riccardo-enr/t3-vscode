@@ -32,6 +32,12 @@ Which agent is running, which one is waiting for you, which one failed? One glan
 
 Read the whole history and reply without switching windows.
 
+<p align="center">
+  <img src="media/screenshots/chat.png" alt="The chat: markdown, code blocks and file links" width="300" />
+  &nbsp;&nbsp;
+  <img src="media/screenshots/chat-slash.png" alt="The slash command menu" width="300" />
+</p>
+
 - **Enter sends**, Shift+Enter adds a new line.
 - **Markdown and code blocks**, with citation quote cards that jump to the quoted reply.
 - **Links that work** &mdash; file links and path-like code spans (`src/foo.js:42`) open in a VS Code editor at that line. Web links open in the browser.
@@ -62,8 +68,10 @@ See the caveat under [Limits](#limits).
 
 Run **`T3 Code: Open usage dashboard`**. It shows cost, tokens and cache savings for 7 or 30 days, a per-day chart, and a per-model table with the provider. Tokens with no known price are noted and left out of the cost.
 
+The **Limits** tab shows how much of each provider's quota is left: a bar per window (session, weekly, ...), the time until it resets, and a tick marking where the bar would end at an even pace. A bar ending right of the tick means you are under pace.
+
 <figure align="center">
-  <img src="media/screenshots/usage.png" alt="The usage dashboard" width="720" />
+  <img src="media/screenshots/limits.png" alt="The usage limits tab" width="720" />
 </figure>
 
 # Keybindings
@@ -138,7 +146,7 @@ Open chat, Open in app, Changes (last turn's diff), Stop and Settle.
 - The sidebar covers the first workspace folder only.
 - **New thread** needs the folder to be a T3 Code project already, and one thread in it to copy the model from
   (or a project default model). Otherwise start the first thread in the app.
-- Approvals and questions show only "waiting for your answer"; answer them in the app.
+- Questions and approvals are answered in the chat pane (approvals: Accept, Decline, Cancel only). Option previews and "always allow" are not shown; use the app for those. The wire format is T3-internal and may change.
 - Subagents started inside a turn (not as T3 threads) do not appear in the tree.
 - **Last turn changes and the "T3" file badges rely on T3 internals.** They read the git refs T3
   keeps per turn (`refs/t3/orchestration-v2/checkpoints/<hash of thread id>/ordinal/<N>`), which
