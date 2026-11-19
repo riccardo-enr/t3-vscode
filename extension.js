@@ -1,6 +1,8 @@
 const vscode = require("vscode");
 const { execFile } = require("child_process");
 const { fetchUsage, summarize } = require("./usage.js");
+const { T3Client } = require("./t3Client.js");
+const { board } = require("./dashboard.js");
 
 // T3 Code rejects (does not truncate) link prompts over 8000 chars; stay under it.
 // Also applied to CLI sends for simplicity.
@@ -256,9 +258,13 @@ function t3(args, input) {
   });
 }
 
+// Live connection to the T3 server (t3Client.js); listThreads() uses it when up, else the CLI path below.
+const client = new T3Client();
+
 async function listThreads() {
   const folder = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
   if (!folder) return [];
+  if (client.state === "connected") return client.list(folder.uri.fsPath);
   const out = await t3(["thread", "list", "--project", folder.uri.fsPath, "--json"]);
   let list;
   try {
@@ -336,7 +342,7 @@ class Threads {
     for (const k of t.pendingBackgroundTasks || []) tip.appendMarkdown("\n- ").appendText(k.description || k.kind || "task");
     item.tooltip = tip;
     item.accessibilityInformation = { label: `${t.title || t.threadId}, ${t.status}${when ? ", " + when : ""}` };
-    item.contextValue = "thread";
+    item.contextValue = t.status === "running" || t.status === "waiting" ? "threadRunning" : "thread";
     const [icon, color] = STATUS_ICON[t.status] || [t.pinned ? "pin" : "comment-discussion"];
     item.iconPath = new vscode.ThemeIcon(icon, color && new vscode.ThemeColor(color));
     item.command = { command: "t3code.openChat", title: "Open chat", arguments: [t] };
@@ -454,7 +460,8 @@ class Chat {
       if (m.open) return openFileLink(m.open);
       if (m.url) return /^https?:\/\//.test(m.url) && vscode.env.openExternal(vscode.Uri.parse(m.url));
       if (typeof m.copy === "string") return vscode.env.clipboard.writeText(m.copy);
-      if (m.openInApp) return openThread(this.thread); // model and effort can only be changed in the app
+      if (m.openInApp) return openThread(this.thread);
+      if (m.pickModel) return client.state === "connected" ? pickModel(this.thread, () => this.poll(true)) : openThread(this.thread);
       if (typeof m.image === "string") {
         try {
           view.webview.postMessage({ imagePath: saveImage(m.image) });
@@ -528,7 +535,7 @@ class Chat {
   // Paint the cached chat (or a light loading state) right away, then fetch the fresh one.
   paint(t) {
     const c = this.cache.get(t.threadId);
-    if (this.view) this.view.webview.postMessage(c ? { ...c, jump: true } : { loading: true, threadId: t.threadId, status: t.status, model: t.model, modelName: prettyModel(t.model) });
+    if (this.view) this.view.webview.postMessage(c ? { ...c, jump: true } : { loading: true, threadId: t.threadId, status: t.status, model: t.model, modelName: modelLabel(t.threadId, t.model) });
     this.last = c ? JSON.stringify([t.threadId, c.status, c.ask, c.messages]) : "";
     this.poll(true, !c);
   }
@@ -563,14 +570,14 @@ class Chat {
       this.status = out.thread.status;
       this.setWorktree(out.thread.worktreePath);
       const ask = out.thread.pendingRequestCount || 0;
-      const s = JSON.stringify([id, out.thread.status, ask, out.messages]);
+      const s = JSON.stringify([id, out.thread.status, ask, modelLabel(id, out.thread.model), out.messages]);
       if (s !== this.last || jump) {
         this.last = s;
         const msg = {
           threadId: id,
           status: out.thread.status,
           model: out.thread.model,
-          modelName: prettyModel(out.thread.model),
+          modelName: modelLabel(id, out.thread.model),
           ask,
           messages: out.messages,
         };
@@ -640,7 +647,7 @@ function chatHtml(webview, media) {
 <div id="work" hidden><i></i><i></i><i></i><span>Working</span></div>
 </div>
 <div id="bar"><textarea id="t" rows="1" aria-label="Message" placeholder="Message the agent"></textarea>
-<div id="row"><span id="model" role="button" tabindex="0" title="Model of this thread. Click to change model or effort in the T3 Code app"></span><button id="ctx" hidden><span id="ctxl"></span><span aria-hidden="true">x</span></button><button id="b" title="Send (Enter)">Send</button></div></div>
+<div id="row"><span id="model" role="button" tabindex="0" title="Model and effort of this thread. Click to change them"></span><button id="ctx" hidden><span id="ctxl"></span><span aria-hidden="true">x</span></button><button id="b" title="Send (Enter)">Send</button></div></div>
 <script nonce="${nonce}" src="${js}"></script></body></html>`;
 }
 
@@ -684,6 +691,116 @@ function openUsage(context) {
     }
   };
   w.onDidReceiveMessage((m) => (m.ready ? load(7) : m.days && load(m.days)));
+}
+
+// "Sonnet 5.5 | medium": effort comes from the live store (the CLI does not report it).
+function modelLabel(threadId, model) {
+  const t = client.threads.get(threadId);
+  const opt = ((t && t.modelSelection && t.modelSelection.options) || []).find((o) => /effort/i.test(o.id));
+  return [prettyModel(model), opt && opt.value].filter(Boolean).join("  |  ");
+}
+
+// Quick pick of every enabled provider's models, then that model's effort levels.
+// ponytail: other model options (service tier, ...) are dropped on change; add them to the picker if missed.
+async function pickModel(thread, done) {
+  const raw = thread && client.threads.get(thread.threadId);
+  if (!raw || !raw.modelSelection) return vscode.window.showWarningMessage("T3 Code: this thread is not in the live list yet.");
+  const cur = raw.modelSelection;
+  let config;
+  try {
+    config = await client.getConfig();
+  } catch (e) {
+    return vscode.window.showErrorMessage("T3 Code: could not read the model list: " + e.message);
+  }
+  // Every enabled provider, current one first; picking another provider's model switches the thread to it.
+  const provs = (config.providers || [])
+    .filter((p) => p.enabled && (p.models || []).length)
+    .sort((a, b) => (b.instanceId === cur.instanceId) - (a.instanceId === cur.instanceId));
+  if (!provs.length) return vscode.window.showWarningMessage("T3 Code: the server lists no models.");
+  const items = [];
+  for (const p of provs) {
+    items.push({ label: p.displayName || p.instanceId, kind: vscode.QuickPickItemKind.Separator });
+    for (const m of p.models) {
+      const now = p.instanceId === cur.instanceId && m.slug === cur.model;
+      items.push({ label: m.name || m.slug, description: now ? m.slug + "  (current)" : m.slug, m, p });
+    }
+  }
+  const model = await vscode.window.showQuickPick(items, { placeHolder: `Model for "${thread.title || thread.threadId}"`, matchOnDescription: true });
+  if (!model) return;
+  const same = model.p.instanceId === cur.instanceId;
+  const desc = ((model.m.capabilities && model.m.capabilities.optionDescriptors) || []).find((d) => /effort/i.test(d.id) && d.type === "select");
+  const options = [];
+  if (desc) {
+    const now = same && (cur.options || []).find((o) => o.id === desc.id);
+    const fallback = now ? now.value : (desc.options.find((o) => o.isDefault) || {}).id;
+    const pick = await vscode.window.showQuickPick(
+      desc.options.map((o) => ({ label: o.label, description: o.id === fallback ? "current" : o.description, id: o.id })),
+      { placeHolder: `${desc.label || "Effort"} for ${model.label}` }
+    );
+    if (!pick) return;
+    options.push({ id: desc.id, value: pick.id });
+  }
+  try {
+    await client.setModel(thread.threadId, { instanceId: model.p.instanceId, model: model.m.slug, ...(options.length ? { options } : {}) });
+    log(`model ${thread.threadId}: ${model.m.slug} ${options.map((o) => o.value).join("")}`);
+    if (done) done();
+  } catch (e) {
+    vscode.window.showErrorMessage("T3 Code: could not change the model: " + e.message.split("\n")[0]);
+  }
+}
+
+// Agent dashboard: one editor-tab panel of cards, sorted by urgency, fed by the live thread list.
+let dashPanel;
+function openDashboard(context, chat) {
+  if (dashPanel) return dashPanel.reveal();
+  const media = vscode.Uri.joinPath(context.extensionUri, "media");
+  const panel = (dashPanel = vscode.window.createWebviewPanel("t3code.dashboard", "T3 Agents", vscode.ViewColumn.Active, {
+    enableScripts: true,
+    localResourceRoots: [media],
+  }));
+  const w = panel.webview;
+  const nonce = require("crypto").randomBytes(16).toString("hex");
+  const uri = (f) => w.asWebviewUri(vscode.Uri.joinPath(media, f)).with({ query: "v=" + nonce });
+  w.html = `<!doctype html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${w.cspSource}; script-src 'nonce-${nonce}';">
+<link rel="stylesheet" href="${uri("dashboard.css")}"></head><body>
+<header><h1>Agents</h1></header>
+<div id="st" role="status"></div><div id="counts"></div><div id="cards"></div>
+<script nonce="${nonce}" src="${uri("dashboard.js")}"></script></body></html>`;
+  let byId = new Map();
+  const view = (t) => ({
+    id: t.threadId, title: t.title || t.threadId, status: t.status, rank: t.rank, ask: t.status === "waiting",
+    live: t.status === "running" || t.status === "waiting", model: prettyModel(t.model), effort: t.effort, when: ago(t.updatedAt),
+    children: (t.children || []).map(view), agents: (t.children || []).length || undefined,
+  });
+  const push = async () => {
+    try {
+      const list = await listThreads();
+      byId = new Map(list.map((t) => [t.threadId, t]));
+      const b = board(list);
+      w.postMessage({ state: client.state, board: { counts: b.counts, cards: b.cards.map(view) } });
+    } catch (e) {
+      w.postMessage({ state: client.state, error: e.message });
+    }
+  };
+  client.on("changed", push);
+  client.on("state", push);
+  const timer = setInterval(push, 60000); // fresh "3m ago"; also the refresh path while on the CLI fallback
+  panel.onDidDispose(() => {
+    dashPanel = undefined;
+    clearInterval(timer);
+    client.off("changed", push);
+    client.off("state", push);
+  });
+  w.onDidReceiveMessage(async (m) => {
+    if (m.ready) return push();
+    const t = byId.get(m.id);
+    if (!t) return;
+    if (m.act === "chat") return chat.open(t);
+    if (m.act === "app") return openThread(t);
+    if (m.act === "stop" && (await vscode.window.showWarningMessage(`Stop "${t.title || t.threadId}"?`, { modal: true }, "Stop")) !== "Stop") return;
+    if (m.act === "stop" || m.act === "settle") return threadAction(m.act, t, chat);
+  });
 }
 
 async function sendToThread(provider, arg) {
@@ -763,6 +880,7 @@ function watchThreads(context, provider, chat) {
   };
   let seenStamp; // separate from the chat's, so one poller never hides a change from the other
   const tick = async () => {
+    if (client.state === "connected") return; // pushes drive the tree; this poll is the CLI fallback only
     if (Date.now() - (provider.listedAt || 0) < 14000) return; // the tree listed recently: reuse it
     const stamp = stateStamp();
     if (stamp && stamp === seenStamp) return; // T3 state unchanged since the last good list
@@ -781,6 +899,19 @@ function watchThreads(context, provider, chat) {
   context.subscriptions.push(bar, { dispose: clearInterval.bind(null, setInterval(tick, 15000)) });
 }
 
+// Stop a running turn / settle a thread over the live connection (the CLI has neither).
+async function threadAction(verb, arg, chat) {
+  const t = arg && arg.thread ? arg.thread : arg && arg.threadId ? arg : chat && chat.thread;
+  if (!t) return vscode.window.showWarningMessage("T3 Code: pick a thread first.");
+  if (client.state !== "connected") return vscode.window.showWarningMessage("T3 Code: not connected to the T3 server (" + client.state + ").");
+  try {
+    await (verb === "stop" ? client.stopThread(t.threadId) : client.settleThread(t.threadId));
+    log(verb + " " + t.threadId);
+  } catch (e) {
+    vscode.window.showErrorMessage(`T3 Code: could not ${verb}: ${e.message.split("\n")[0]}`);
+  }
+}
+
 function activate(context) {
   const provider = new Threads();
   const chat = new Chat(context.extensionUri, context.workspaceState);
@@ -794,6 +925,22 @@ function activate(context) {
   context.subscriptions.push(vscode.window.registerFileDecorationProvider(badges));
   context.subscriptions.push(chat);
   watchThreads(context, provider, chat);
+  client.on("log", log);
+  client.on("state", (s, why) => {
+    log("connection: " + s + (why ? " (" + why + ")" : ""));
+    provider.refresh(); // connected -> live list; down -> CLI list
+  });
+  // Feed the status bar and finish notifications directly: getChildren only runs while the tree is visible.
+  client.on("changed", async () => {
+    const list = await listThreads().catch(() => undefined);
+    if (!list) return;
+    provider.list = list;
+    provider.listedAt = Date.now();
+    if (provider.onList) provider.onList(list);
+    provider.refresh(true); // re-render from this list, no second read
+  });
+  client.start();
+  context.subscriptions.push({ dispose: () => client.stop() });
   let ctxTimer;
   const track = () => {
     clearTimeout(ctxTimer);
@@ -825,7 +972,10 @@ function activate(context) {
     vscode.commands.registerCommand("t3code.showTurnChanges", (arg) => showTurnChanges(arg && arg.thread ? arg.thread : chat.thread)),
     vscode.commands.registerCommand("t3code.sendToThread", (arg) => sendToThread(provider, arg)),
     vscode.commands.registerCommand("t3code.newThread", () => newThread(provider, chat)),
-    vscode.commands.registerCommand("t3code.openUsage", () => openUsage(context))
+    vscode.commands.registerCommand("t3code.openUsage", () => openUsage(context)),
+    vscode.commands.registerCommand("t3code.openDashboard", () => openDashboard(context, chat)),
+    vscode.commands.registerCommand("t3code.stopThread", (arg) => threadAction("stop", arg, chat)),
+    vscode.commands.registerCommand("t3code.settleThread", (arg) => threadAction("settle", arg, chat))
   );
 }
 

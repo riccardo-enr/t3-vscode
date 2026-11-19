@@ -272,11 +272,11 @@ function ctxOff(off) {
   ctxEl.title = off ? "Not attached. Click to attach to the next message" : "Attached to the next message as a path reference. Click to leave it out";
 }
 ctxEl.onclick = () => ctxOff(!ctxEl.classList.contains("off"));
-modelEl.onclick = () => vs.postMessage({ openInApp: true });
+modelEl.onclick = () => vs.postMessage({ pickModel: true });
 modelEl.onkeydown = (e) => {
   if (e.key === "Enter" || e.key === " ") {
     e.preventDefault();
-    vs.postMessage({ openInApp: true });
+    vs.postMessage({ pickModel: true });
   }
 };
 t.oninput = grow;

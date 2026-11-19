@@ -25,7 +25,10 @@
       { "command": "t3code.chatOpenInApp", "title": "T3 Code: Open chat thread in T3 Code app", "icon": "$(link-external)" },
       { "command": "t3code.showTurnChanges", "title": "T3 Code: Show changes of last turn", "icon": "$(diff)" },
       { "command": "t3code.openWorktree", "title": "T3 Code: Open worktree in Source Control", "icon": "$(source-control)" },
-      { "command": "t3code.askFix", "title": "T3 Code: Ask T3 to fix" }
+      { "command": "t3code.askFix", "title": "T3 Code: Ask T3 to fix" },
+      { "command": "t3code.openDashboard", "title": "T3 Code: Open agent dashboard", "icon": "$(dashboard)" },
+      { "command": "t3code.stopThread", "title": "T3 Code: Stop thread", "icon": "$(debug-stop)" },
+      { "command": "t3code.settleThread", "title": "T3 Code: Settle thread", "icon": "$(check)" }
     ],
     "keybindings": [
       { "command": "t3code.sendSelection", "key": "ctrl+alt+shift+d", "mac": "cmd+alt+shift+d", "when": "editorHasSelection" },
@@ -52,20 +55,26 @@
         { "command": "t3code.openThread", "when": "false" },
         { "command": "t3code.openChat", "when": "false" },
         { "command": "t3code.openWorktree", "when": "t3code.chatWorktree" },
-        { "command": "t3code.askFix", "when": "false" }
+        { "command": "t3code.askFix", "when": "false" },
+        { "command": "t3code.stopThread", "when": "false" },
+        { "command": "t3code.settleThread", "when": "false" }
       ],
       "view/title": [
         { "command": "t3code.newThread", "when": "view == t3code.threads", "group": "navigation@1" },
         { "command": "t3code.refresh", "when": "view == t3code.threads", "group": "navigation@2" },
+        { "command": "t3code.openDashboard", "when": "view == t3code.threads", "group": "navigation@3" },
         { "command": "t3code.chatRefresh", "when": "view == t3code.chat", "group": "navigation@1" },
         { "command": "t3code.chatOpenInApp", "when": "view == t3code.chat", "group": "navigation@2" },
         { "command": "t3code.showTurnChanges", "when": "view == t3code.chat", "group": "navigation@3" },
-        { "command": "t3code.openWorktree", "when": "view == t3code.chat && t3code.chatWorktree", "group": "navigation@4" }
+        { "command": "t3code.openWorktree", "when": "view == t3code.chat && t3code.chatWorktree", "group": "navigation@4" },
+        { "command": "t3code.stopThread", "when": "view == t3code.chat", "group": "navigation@5" }
       ],
       "view/item/context": [
-        { "command": "t3code.openThread", "when": "view == t3code.threads && viewItem == thread" },
-        { "command": "t3code.sendToThread", "when": "view == t3code.threads && viewItem == thread" },
-        { "command": "t3code.showTurnChanges", "when": "view == t3code.threads && viewItem == thread" }
+        { "command": "t3code.openThread", "when": "view == t3code.threads && viewItem =~ /^thread/" },
+        { "command": "t3code.sendToThread", "when": "view == t3code.threads && viewItem =~ /^thread/" },
+        { "command": "t3code.showTurnChanges", "when": "view == t3code.threads && viewItem =~ /^thread/" },
+        { "command": "t3code.stopThread", "when": "view == t3code.threads && viewItem == threadRunning", "group": "inline" },
+        { "command": "t3code.settleThread", "when": "view == t3code.threads && viewItem =~ /^thread/" }
       ],
       "editor/context": [
         { "command": "t3code.sendSelection", "when": "editorHasSelection", "group": "t3code" },

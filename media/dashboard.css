@@ -1,0 +1,23 @@
+/* Agent dashboard. Only --vscode-* theme variables. */
+body{font-family:var(--vscode-font-family);font-size:var(--vscode-font-size);color:var(--vscode-foreground);background:var(--vscode-editor-background);margin:0;padding:20px 28px;max-width:900px}
+:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:1px}
+header{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+h1{font-size:1.3em;font-weight:600;margin:0;flex:1}
+button{font:inherit;cursor:pointer;padding:3px 12px;border:1px solid var(--vscode-widget-border,transparent);background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}
+button:hover{background:var(--vscode-button-secondaryHoverBackground)}
+#counts{display:flex;gap:12px;margin-bottom:16px}
+.tile{flex:1;padding:10px 14px;background:var(--vscode-sideBar-background);border:1px solid var(--vscode-widget-border,transparent);border-radius:4px}
+.tile .v{font-size:1.6em;font-weight:600}
+.dim{color:var(--vscode-descriptionForeground)}
+#st{min-height:18px;color:var(--vscode-descriptionForeground);margin-bottom:8px}
+.card{padding:10px 12px;margin-bottom:8px;background:var(--vscode-sideBar-background);border:1px solid var(--vscode-widget-border,transparent);border-left:3px solid var(--vscode-widget-border,transparent);border-radius:4px}
+.card.r0{border-left-color:var(--vscode-charts-yellow)}
+.card.r1{border-left-color:var(--vscode-charts-blue)}
+.card.r2{border-left-color:var(--vscode-errorForeground)}
+.card.kid{margin:6px 0 0 20px;padding:6px 10px}
+.top{display:flex;align-items:baseline;gap:10px}
+.title{flex:1;font-weight:600;cursor:pointer;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.badge{font-size:11px;padding:1px 7px;border-radius:9px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground)}
+.meta{margin-top:3px;font-size:11px}
+.acts{margin-top:8px;display:flex;gap:6px}
+.acts button{padding:1px 9px;font-size:11px}
