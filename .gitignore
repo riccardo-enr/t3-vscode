@@ -4,3 +4,7 @@ node_modules/
 .claude/settings.local.json
 .claude/MISTAKES.md
 docs/plan/
+
+.artifacts/
+docs/icons/
+CLAUDE.md
