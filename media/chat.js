@@ -322,11 +322,11 @@ function lock(on) {
 // The bubble shows at once; the text stays in the (locked) box until the extension confirms with {sent}.
 function send() {
   const x = t.value.trim();
-  if (!x || btn.disabled) return;
+  if ((!x && !cites.length) || btn.disabled) return;
   if (thread && x[0] === "/" && runBuiltin(x.slice(1).toLowerCase())) return;
   lock(true);
   if (thread) {
-    pend = { node: node({ role: "user", text: x }, true), after: count };
+    pend = { node: node({ role: "user", text: x || cites.map((c) => c.q.text.trim()).join("\n") }, true), after: count };
     log.append(pend.node);
     mode("");
     log.scrollTop = log.scrollHeight;

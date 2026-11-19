@@ -489,7 +489,7 @@ class Chat {
         }
         return;
       }
-      if (typeof m.text !== "string" || !m.text.trim()) return; // only an explicit composer send reaches the server
+      if (typeof m.text !== "string" || (!m.text.trim() && !(Array.isArray(m.cites) && m.cites.length))) return; // only an explicit composer send reaches the server
       // The webview keeps the typed text until it gets {sent}, so a failed send loses nothing.
       if (!this.thread) return view.webview.postMessage({ sendError: "click a thread first" });
       try {
@@ -497,7 +497,8 @@ class Chat {
         const id = this.thread.threadId;
         const quotes = citeLinks(client.envId, id, m.cites);
         const body = m.ctx === true && this.ctx ? m.text + "\n\n" + ctxRef(this.ctx) : m.text;
-        const text = quotes ? quotes + "\n\n" + body : body;
+        const text = (quotes ? quotes + "\n\n" : "") + body.trim();
+        if (!text) return view.webview.postMessage({ sendError: "nothing to send" });
         await client.send(id, text, this.fresh.has(id));
         this.fresh.delete(id);
         view.webview.postMessage({ sent: true });
