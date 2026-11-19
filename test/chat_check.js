@@ -18,13 +18,13 @@ class N {
 const posted = [];
 const ctx = {
   acquireVsCodeApi: () => ({ postMessage: (m) => posted.push(m) }),
-  document: { createElement: (t) => new N(t), getElementById: (id) => new N(id) },
+  document: { body: new N("body"), addEventListener() {}, createElement: (t) => new N(t), getElementById: (id) => new N(id) },
   addEventListener() {}, setTimeout, URLSearchParams,
 };
 vm.createContext(ctx);
-vm.runInContext(fs.readFileSync(path.join(__dirname, "../media/chat.js"), "utf8") + "\n;this.md=md;this.body=body;this.collapse=collapse;" +
+vm.runInContext(fs.readFileSync(path.join(__dirname, "../media/chat.js"), "utf8") + "\n;this.md=md;this.body=body;this.collapse=collapse;this.askCard=askCard;" +
   "this.slash={set:(th,v)=>{thread=th;t.value=v;},update:updateMenu,pick,names:()=>items.map((c)=>c.name).join('|'),menu,t,prov:(c)=>{provCmds=c;}};", ctx);
-const { md, body, collapse } = ctx;
+const { md, body, collapse, askCard } = ctx;
 
 // extension.js only touches `vscode` inside functions, so an empty stub is enough to load it.
 const Module = require("module"), load = Module._load;
@@ -148,8 +148,8 @@ assert.deepStrictEqual(shape(collapse([u("r", "q"), a("r", "x"), u("r", "more"),
   posted.length = 0;
   S.set("th", "/cl");
   S.update();
-  S.pick(0); // /clear sends nothing, only marks the next message
-  assert.strictEqual(JSON.stringify(posted), JSON.stringify([{ fresh: true }]));
+  S.pick(0); // /clear sends no text, it asks for a new thread
+  assert.strictEqual(JSON.stringify(posted), JSON.stringify([{ newThread: true }]));
   assert.strictEqual(S.t.value, "");
   posted.length = 0;
   S.set("th", "/settle");
@@ -159,6 +159,33 @@ assert.deepStrictEqual(shape(collapse([u("r", "q"), a("r", "x"), u("r", "more"),
   S.set("", "/c");
   S.update();
   assert.strictEqual(S.menu.hidden, true); // no thread, no menu
+}
+
+// Question card: labels are plain text, Submit posts the picked labels, an empty question posts nothing.
+{
+  const a = { id: "r1", kind: "input", questions: [{ id: "Q", header: "H", question: "Which?", multiSelect: false, allowCustomAnswer: false,
+    options: [{ label: "<img src=x onerror=alert(1)>", description: "" }, { label: "B", description: "d" }] }] };
+  const { node } = askCard(a);
+  const walk = (n, f) => { f(n); (n.kids || []).forEach((k) => walk(k, f)); };
+  const all = []; walk(node, (n) => all.push(n));
+  assert(all.some((n) => n.textContent === "<img src=x onerror=alert(1)>" && n.innerHTML === ""));
+  const radios = all.filter((n) => n.tag === "input"), btns = all.filter((n) => n.tag === "button");
+  assert(radios.length === 2 && radios.every((r) => r.type === "radio"));
+  posted.length = 0;
+  btns[0].onclick(); // Submit with nothing picked
+  assert.strictEqual(posted.length, 0);
+  radios[1].checked = true;
+  btns[0].onclick();
+  assert.strictEqual(JSON.stringify(posted), JSON.stringify([{ answer: { requestId: "r1", answers: { Q: ["B"] } } }]));
+  posted.length = 0;
+  btns[1].onclick();
+  assert.strictEqual(JSON.stringify(posted), JSON.stringify([{ dismiss: { requestId: "r1" } }]));
+  posted.length = 0;
+  const ap = askCard({ id: "r2", kind: "approval", prompt: "rm x", reason: "", decisions: ["accept", "decline"] });
+  const ab = []; walk(ap.node, (n) => n.tag === "button" && ab.push(n));
+  ab[0].onclick();
+  assert.strictEqual(JSON.stringify(posted), JSON.stringify([{ decide: { requestId: "r2", decision: "accept" } }]));
+  assert.strictEqual(ab.length, 2);
 }
 
 console.log("chat_check ok");

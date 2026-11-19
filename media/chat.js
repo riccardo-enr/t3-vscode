@@ -5,6 +5,8 @@ const st = document.getElementById("st");
 const work = document.getElementById("work");
 const ask = document.getElementById("ask");
 ask.onclick = () => vs.postMessage({ openInApp: true });
+const cardEl = document.getElementById("card");
+let cardId = "", cardLock = () => {};
 const freshEl = document.getElementById("fresh");
 freshEl.onclick = () => vs.postMessage({ fresh: false });
 const t = document.getElementById("t");
@@ -161,6 +163,7 @@ let shown = [], count = 0, thread = "", pend = null, opened = new Set();
 function node(m, pending) {
   const n = el("div", "m " + m.role + (pending ? " pending" : ""));
   n._t = m.text || "";
+  n._id = m.id;
   n.setAttribute("aria-label", m.role === "user" ? "You" : "Assistant");
   n.append(body(n._t));
   return n;
@@ -196,6 +199,72 @@ function switchTo(id) {
   opened = new Set();
   log.replaceChildren();
 }
+// Card for a pending question or approval. All text goes in through textContent (agent text is untrusted).
+// Returns {node, lock(on)}; the buttons post {answer}, {decide} or {dismiss} to the extension.
+function askCard(a) {
+  const node = el("div", "askcard"), ctl = [];
+  const lock = (on) => ctl.forEach((c) => (c.disabled = on));
+  const button = (label, fn) => {
+    const b = el("button", "askbtn", label);
+    b.onclick = fn;
+    ctl.push(b);
+    return b;
+  };
+  const fail = (m) => { st.className = "err"; st.textContent = m; };
+  if (a.kind === "approval") {
+    node.append(el("div", "qh", "Approval needed"));
+    if (a.prompt) node.append(el("pre", "qq", a.prompt));
+    if (a.reason) node.append(el("div", "qd", a.reason));
+    const row = el("div", "qrow");
+    for (const d of a.decisions)
+      row.append(button(d === "accept" ? "Accept" : d === "decline" ? "Decline" : "Cancel", () => { lock(true); vs.postMessage({ decide: { requestId: a.id, decision: d } }); }));
+    node.append(row);
+    return { node, lock };
+  }
+  const reads = [];
+  for (const q of a.questions) {
+    const box = el("div", "q");
+    box.append(el("div", "qh", q.header), el("div", "qq", q.question));
+    const picks = [];
+    for (const o of q.options) {
+      const lab = el("label", "qo"), inp = el("input");
+      inp.type = q.multiSelect ? "checkbox" : "radio";
+      inp.name = q.id;
+      ctl.push(inp);
+      picks.push([inp, o.label]);
+      lab.append(inp, el("span", "", o.label));
+      if (o.description) lab.append(el("div", "qd", o.description));
+      box.append(lab);
+    }
+    let other;
+    if (q.allowCustomAnswer) {
+      other = el("input", "qother");
+      other.type = "text";
+      other.placeholder = "Other answer";
+      ctl.push(other);
+      box.append(other);
+    }
+    reads.push(() => {
+      const custom = other && other.value.trim();
+      const v = picks.filter(([i]) => i.checked).map(([, l]) => l);
+      return [q.id, custom ? (q.multiSelect ? v.concat(custom) : [custom]) : v];
+    });
+    node.append(box);
+  }
+  const row = el("div", "qrow");
+  row.append(
+    button("Submit", () => {
+      const answers = {};
+      for (const r of reads) { const [id, v] = r(); answers[id] = v; }
+      if (Object.values(answers).some((v) => !v.length)) return fail("answer every question first");
+      lock(true);
+      vs.postMessage({ answer: { requestId: a.id, answers } });
+    }),
+    button("Skip", () => { lock(true); vs.postMessage({ dismiss: { requestId: a.id } }); })
+  );
+  node.append(row);
+  return { node, lock };
+}
 function header(d) {
   st.className = "";
   st.dataset.s = d.status || "";
@@ -203,9 +272,18 @@ function header(d) {
   modelEl.textContent = d.modelName || d.model || "";
   modelEl.title = (d.model || "") + " (click to change model or effort in the T3 Code app)";
   work.hidden = d.status !== "running";
-  // The CLI exposes only the count of pending questions or approvals, not their text, so answer in the app.
-  ask.hidden = !d.ask;
-  ask.textContent = d.ask ? `Waiting for your answer (${d.ask}). Click to answer in T3 Code` : "";
+  // d.ask: an object (question or approval with its text), 1 (waiting, text not fetched yet), or 0.
+  const card = d.ask && typeof d.ask === "object" ? d.ask : null;
+  ask.hidden = !d.ask || !!card;
+  ask.textContent = d.ask && !card ? "Waiting for your answer. Click to answer in T3 Code" : "";
+  cardEl.hidden = !card;
+  if (!card) cardId = "";
+  else if (card.id !== cardId) {
+    cardId = card.id;
+    const c = askCard(card);
+    cardLock = c.lock;
+    cardEl.replaceChildren(c.node);
+  }
   freshEl.hidden = !d.fresh;
 }
 function render(d) {
@@ -253,7 +331,7 @@ function send() {
     mode("");
     log.scrollTop = log.scrollHeight;
   }
-  vs.postMessage({ text: x, ctx: !ctxEl.hidden && !ctxEl.classList.contains("off") });
+  vs.postMessage({ cites: cites.map((c) => c.q), text: x, ctx: !ctxEl.hidden && !ctxEl.classList.contains("off") });
 }
 // Links never navigate the webview: the extension opens files in an editor and web links in the browser.
 log.addEventListener("click", (e) => {
@@ -269,6 +347,76 @@ log.addEventListener("click", (e) => {
   e.preventDefault();
   vs.postMessage(a.dataset.file ? { open: a.dataset.file } : { url: a.dataset.url });
 });
+
+// ---- cite: select text in an assistant reply, click Cite, and it goes with the next message ----
+const citesEl = document.getElementById("cites");
+const cites = []; // { q: {id, text, start, prefix, suffix} }
+const citeBtn = el("button", "citebtn", "Cite");
+citeBtn.hidden = true;
+document.body.append(citeBtn);
+function drawCites() {
+  citesEl.replaceChildren(...cites.map((c, i) => {
+    const row = el("div", "cq"), x = el("button", null, "x");
+    x.title = "Remove this quote";
+    x.onclick = () => (cites.splice(i, 1), drawCites());
+    row.append(el("span", null, c.q.text.trim() + (c.q.comment ? "\n> " + c.q.comment : "")), x);
+    return row;
+  }));
+}
+let pending = null;
+document.addEventListener("selectionchange", () => {
+  const s = getSelection(), r = s && s.rangeCount && !s.isCollapsed ? s.getRangeAt(0) : null;
+  const a = r && (r.commonAncestorContainer.nodeType === 1 ? r.commonAncestorContainer : r.commonAncestorContainer.parentElement);
+  if (!pop.hidden) return; // typing a comment moves the selection into the box
+  const m = a && a.closest(".m.assistant");
+  const text = r ? s.toString() : "";
+  if (!m || !m._id || !text.trim()) { pending = null; citeBtn.hidden = true; return; }
+  const full = m._t, i = full.indexOf(text.trim());
+  const start = Math.max(0, i), end = start + text.trim().length;
+  pending = { id: m._id, text, start, prefix: i < 0 ? "" : full.slice(Math.max(0, start - 32), start), suffix: i < 0 ? "" : full.slice(end, end + 32) };
+  const b = r.getBoundingClientRect();
+  citeBtn.hidden = false;
+  citeBtn.style.top = Math.max(4, b.top - 30) + "px";
+  citeBtn.style.left = Math.max(4, Math.min(b.left, innerWidth - 60)) + "px";
+});
+citeBtn.onmousedown = (e) => e.preventDefault(); // keep the selection until the click lands
+// Like the T3 app: Cite opens a box for an optional comment; Enter adds the quote, Escape cancels.
+const pop = el("div", "citepop"), pin = el("textarea"), pok = el("button", null, "Cite"), pno = el("button", "ghost", "Cancel");
+pop.hidden = true;
+pin.rows = 2;
+pin.placeholder = "Add an optional comment...";
+pin.maxLength = 1000;
+const pb = el("div", "pb");
+pb.append(pno, pok);
+pop.append(pin, pb);
+document.body.append(pop);
+let held = null;
+function closePop() {
+  pop.hidden = true;
+  held = null;
+}
+citeBtn.onclick = () => {
+  if (!pending) return;
+  held = pending;
+  pop.style.top = citeBtn.style.top;
+  pop.style.left = citeBtn.style.left;
+  pin.value = "";
+  pop.hidden = false;
+  citeBtn.hidden = true;
+  pin.focus();
+};
+pok.onclick = () => {
+  if (held) cites.push({ q: { ...held, comment: pin.value.trim() } });
+  closePop();
+  getSelection().removeAllRanges();
+  drawCites();
+  t.focus();
+};
+pno.onclick = closePop;
+pin.onkeydown = (e) => {
+  if (e.key === "Enter" && !e.shiftKey) (e.preventDefault(), pok.onclick());
+  else if (e.key === "Escape") closePop();
+};
 btn.onclick = send;
 // The chip (active file and selection) is on by default; a click leaves it out until it changes.
 function ctxOff(off) {
@@ -284,10 +432,10 @@ modelEl.onkeydown = (e) => {
   }
 };
 // ---- slash commands ----
-// App commands send nothing: /clear marks the next message as a fresh session, /model opens the picker.
+// App commands send nothing: /clear opens a new thread, /model opens the picker.
 // Provider commands (/compact, /review, skills) go through as text, as the app does.
 const BUILTIN = [
-  { name: "clear", desc: "Start a fresh session; earlier messages stay visible", msg: { fresh: true } },
+  { name: "clear", desc: "Start a new chat (new thread in this project)", msg: { newThread: true } },
   { name: "model", desc: "Switch response model for this thread", msg: { pickModel: true } },
   { name: "effort", desc: "Change the reasoning effort of the current model", msg: { pickEffort: true } },
   { name: "settle", desc: "Settle this thread (hides it from the list)", msg: { settle: true } },
@@ -404,11 +552,14 @@ addEventListener("message", (e) => {
   if (d.sent) {
     if (pend) pend.node.classList.remove("pending");
     t.value = "";
+    cites.length = 0;
+    drawCites();
     grow();
     lock(false);
     t.focus();
     return;
   }
+  if (d.askError) { cardLock(false); st.className = "err"; st.textContent = "not answered: " + d.askError; return; }
   if (d.sendError) {
     if (pend) { pend.node.remove(); pend = null; }
     if (!log.children.length) mode("empty");

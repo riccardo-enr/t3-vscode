@@ -1,6 +1,6 @@
 // Self-check for t3Client.js pure helpers. Run: node test/t3client_check.js
 const assert = require("assert");
-const { T3Client, toCli, applyShell, applyThread, exchangeForm, backoff, SCOPES } = require("../t3Client.js");
+const { T3Client, pendingAsk, askReply, toCli, applyShell, applyThread, exchangeForm, backoff, SCOPES } = require("../t3Client.js");
 
 const th = (id, o = {}) => ({ id, projectId: "p", title: id, status: "idle", activityRunStatus: null, modelSelection: { model: "m", options: [{ id: "effort", value: "high" }] },
   lineage: { parentThreadId: null }, settledAt: null, snoozedUntil: null, pinnedAt: null, pendingRuntimeRequest: null, ...o });
@@ -91,3 +91,33 @@ assert.deepStrictEqual([0, 1, 2, 5, 9].map(backoff), [1000, 2000, 4000, 30000, 3
   console.error(e);
   process.exit(1);
 });
+
+// Pending question / approval: read from the projection, answered only with what the server offered.
+{
+  const proj = {
+    runtimeRequests: [{ id: "r1", status: "pending" }, { id: "r2", status: "resolved" }, { id: "r3", status: "pending" }],
+    turnItems: [
+      { type: "user_input_request", requestId: "r1", questions: [{ id: "Q", header: "H", question: "Which?", multiSelect: false, options: [{ label: "A" }, { label: "B", description: "d" }] }] },
+      { type: "user_input_request", requestId: "r2", questions: [] },
+      { type: "approval_request", requestId: "r3", prompt: "rm x", options: [{ decision: "accept" }, { decision: "acceptAlways" }, { decision: "decline" }] },
+    ],
+  };
+  const q = pendingAsk(proj, "r1");
+  assert.deepStrictEqual(q.questions[0].options.map((o) => o.label), ["A", "B"]);
+  assert.strictEqual(pendingAsk(proj, "r2"), null); // resolved
+  assert.strictEqual(pendingAsk(proj, "nope"), null);
+  const ap = pendingAsk(proj, "r3");
+  assert.deepStrictEqual(ap.decisions, ["accept", "decline"]); // acceptAlways is not offered here
+  assert.deepStrictEqual(askReply(q, { requestId: "r1", answers: { Q: ["B"] } }), { answers: { Q: ["B"] } });
+  assert.throws(() => askReply(q, { requestId: "old", answers: { Q: ["B"] } })); // stale id
+  assert.throws(() => askReply(q, { requestId: "r1", answers: { Q: ["Z"] } })); // not an option
+  assert.throws(() => askReply(q, { requestId: "r1", answers: { Q: ["A", "B"] } })); // single-select
+  assert.throws(() => askReply(q, { requestId: "r1", answers: {} }));
+  assert.deepStrictEqual(askReply(ap, { requestId: "r3", decision: "decline" }), { decision: "decline" });
+  assert.throws(() => askReply(ap, { requestId: "r3", decision: "acceptAlways" }));
+  assert.throws(() => askReply(null, { requestId: "r1" }));
+  const c = Object.create(T3Client.prototype);
+  c.request = (_, p) => p;
+  assert.deepStrictEqual([c.respond("t", "r1", { decision: "accept" }).type, c.respond("t", "r1", { decision: "accept" }).requestId], ["runtime-request.respond", "r1"]);
+  assert.strictEqual(c.dismissAsk("t", "r1").type, "thread.user-input.dismiss");
+}

@@ -1,7 +1,7 @@
 const vscode = require("vscode");
 const { execFile } = require("child_process");
 const { fetchUsage, summarize } = require("./usage.js");
-const { T3Client, toCli } = require("./t3Client.js");
+const { T3Client, toCli, pendingAsk, askReply } = require("./t3Client.js");
 const { board } = require("./dashboard.js");
 
 // T3 Code rejects (does not truncate) link prompts over 8000 chars; stay under it.
@@ -331,7 +331,7 @@ class Threads {
     item.command = { command: "t3code.openChat", title: "Open chat", arguments: [t] };
     return item;
   }
-  // Child agent threads nest under their parent; a child whose parent is hidden (settled/snoozed) shows at the top.
+  // Child agent threads nest under their parent; a child of a settled/snoozed parent is dropped by client.list().
   async getChildren(element) {
     if (element) return (this.kids.get(element.thread.threadId) || []).map((t) => this.item(t));
     try {
@@ -401,6 +401,23 @@ function openThread(t) {
   openLink(t.link.startsWith(WEB_PREFIX) ? t.link.replace(WEB_PREFIX, "t3code://") : t.link);
 }
 
+// T3's assistant quote: [Assistant quote](t3-citation://v1/env/thread/message?text&start&end&prefix&suffix).
+// The server expands these links for the provider. Built here from ids, never copied from webview input.
+function citeLinks(env, thread, cites) {
+  if (!env || !Array.isArray(cites)) return "";
+  const enc = (v) => encodeURIComponent(String(v));
+  return cites
+    .slice(0, 8)
+    .filter((c) => c && typeof c.id === "string" && typeof c.text === "string" && c.text.trim())
+    .map((c) => {
+      const text = c.text.slice(0, 2000), n = (v) => (Number.isInteger(v) && v >= 0 ? v : 0);
+      const q = new URLSearchParams({ text, start: n(c.start), end: n(c.start) + text.length, prefix: String(c.prefix || "").slice(-32), suffix: String(c.suffix || "").slice(0, 32) });
+      if (typeof c.comment === "string" && c.comment.trim()) q.set("comment", c.comment.trim().slice(0, 1000));
+      return `[Assistant quote](t3-citation://v1/${enc(env)}/${enc(thread)}/${enc(c.id)}?${q.toString().replace(/\(/g, "%28").replace(/\)/g, "%29")})`;
+    })
+    .join("\n");
+}
+
 // Chat view in the T3 Code sidebar: the open thread's messages arrive live over the socket (client.watch);
 // status, model and pending answers come from the live thread list. Rendering lives in media/chat.js.
 // ponytail: one subscription for the open thread, kept while the view is hidden (the view keeps its context).
@@ -444,7 +461,24 @@ class Chat {
         this.fresh[m.fresh ? "add" : "delete"](this.thread.threadId);
         return this.render();
       }
+      if (m.newThread) return newThread(this);
       if (m.settle) return threadAction("settle", this.thread, this);
+      // Answers to a pending question or approval. askReply refuses anything the server did not offer.
+      if (m.answer || m.decide || m.dismiss) {
+        try {
+          const id = this.thread.threadId;
+          if (m.dismiss) {
+            if (!this.ask || this.ask.kind !== "input" || m.dismiss.requestId !== this.ask.id) throw new Error("that request is no longer pending");
+            await client.dismissAsk(id, this.ask.id);
+          } else {
+            const r = m.answer || m.decide;
+            await client.respond(id, r.requestId, askReply(this.ask, r));
+          }
+        } catch (e) {
+          view.webview.postMessage({ askError: e.message.split("\n")[0] });
+        }
+        return;
+      }
       if (m.pickModel || m.pickEffort)
         return client.state === "connected" ? pickModel(this.thread, () => this.render(), !!m.pickEffort) : openThread(this.thread);
       if (typeof m.image === "string") {
@@ -460,8 +494,10 @@ class Chat {
       if (!this.thread) return view.webview.postMessage({ sendError: "click a thread first" });
       try {
         // The reference is built here from the tracked editor, never from webview input.
-        const text = m.ctx === true && this.ctx ? m.text + "\n\n" + ctxRef(this.ctx) : m.text;
         const id = this.thread.threadId;
+        const quotes = citeLinks(client.envId, id, m.cites);
+        const body = m.ctx === true && this.ctx ? m.text + "\n\n" + ctxRef(this.ctx) : m.text;
+        const text = quotes ? quotes + "\n\n" + body : body;
         await client.send(id, text, this.fresh.has(id));
         this.fresh.delete(id);
         view.webview.postMessage({ sent: true });
@@ -525,6 +561,8 @@ class Chat {
     this.msgs = undefined;
     this.last = "";
     this.jump = true;
+    this.askId = undefined; // the pending question belongs to the old thread
+    this.ask = null;
     this.setWorktree(undefined);
     const id = this.thread.threadId;
     this.unwatch = client.watch(id, (msgs) => {
@@ -570,8 +608,24 @@ class Chat {
     }
     const messages = this.msgs
       .filter((m) => m.role === "user" || m.role === "assistant")
-      .map((m) => ({ role: m.role, runId: m.runId, text: m.text || "" }));
-    const ask = t.pendingRequest ? 1 : 0;
+      .map((m) => ({ id: m.id, role: m.role, runId: m.runId, text: m.text || "" }));
+    // The text of a pending question comes from one projection fetch per request id; until then (or if it
+    // fails) the pane shows the old "answer in T3 Code" button (ask = 1).
+    const rid = t.pendingRequest ? t.pendingRequest.id : undefined;
+    if (rid !== this.askId) {
+      this.askId = rid;
+      this.ask = null;
+      if (rid)
+        client.getProjection(id).then(
+          (p) => {
+            if (!this.thread || this.thread.threadId !== id || this.askId !== rid) return;
+            this.ask = pendingAsk(p, rid);
+            this.render();
+          },
+          () => { }
+        );
+    }
+    const ask = this.ask || (rid ? 1 : 0);
     const s = JSON.stringify([head, ask, messages]);
     if (s === this.last && !this.jump) return;
     this.last = s;
@@ -628,10 +682,11 @@ function chatHtml(webview, media) {
 <div id="empty" hidden><div class="logo"></div><div id="emptytxt">Pick a thread in the Threads view to see its chat here.</div></div>
 <div id="skel" aria-hidden="true"><i></i><i></i><i></i></div>
 <button id="ask" hidden></button>
+<div id="card" hidden></div>
 <button id="fresh" hidden>Your next message starts a fresh session. Click to keep the current session</button>
 <div id="work" hidden><i></i><i></i><i></i><span>Working</span></div>
 </div>
-<div id="bar"><div id="menu" role="listbox" aria-label="Commands" hidden></div><textarea id="t" rows="1" aria-label="Message" placeholder="Message the agent"></textarea>
+<div id="bar"><div id="cites"></div><div id="menu" role="listbox" aria-label="Commands" hidden></div><textarea id="t" rows="1" aria-label="Message" placeholder="Message the agent"></textarea>
 <div id="row"><span id="model" role="button" tabindex="0" title="Model and effort of this thread. Click to change them"></span><button id="ctx" hidden><span id="ctxl"></span><span aria-hidden="true">x</span></button><button id="b" title="Send (Enter)">Send</button></div></div>
 <script nonce="${nonce}" src="${js}"></script></body></html>`;
 }

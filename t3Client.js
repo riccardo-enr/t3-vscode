@@ -75,6 +75,55 @@ function applyThread(msgs, v) {
   return false;
 }
 
+// Pending question or approval of one thread projection (orchestration.getThreadProjection), or null when
+// request `id` is not pending there. Question: {id, kind: "input", responseMode, questions}.
+// Approval: {id, kind: "approval", prompt, reason, decisions} (only accept, decline, cancel are offered).
+function pendingAsk(proj, id) {
+  const reqs = (proj && proj.runtimeRequests) || [];
+  if (!reqs.some((r) => r.id === id && r.status === "pending")) return null;
+  const items = Array.isArray(proj.turnItems) ? proj.turnItems : Object.values(proj.turnItems || {});
+  const it = items.filter((x) => x && x.requestId === id && (x.type === "user_input_request" || x.type === "approval_request")).pop();
+  if (!it) return null;
+  if (it.type === "user_input_request")
+    return {
+      id,
+      kind: "input",
+      responseMode: it.responseMode || null,
+      questions: (it.questions || []).map((q) => ({
+        id: q.id,
+        header: q.header || "",
+        question: q.question || "",
+        options: (q.options || []).map((o) => ({ label: o.label, description: o.description || "" })),
+        multiSelect: !!q.multiSelect,
+        allowCustomAnswer: !!q.allowCustomAnswer,
+      })),
+    };
+  const offered = (it.options || []).map((o) => o.decision);
+  const decisions = ["accept", "decline", "cancel"].filter((d) => !offered.length || offered.includes(d));
+  return { id, kind: "approval", prompt: it.prompt || "", reason: it.reason || "", decisions };
+}
+
+// Webview reply -> the fields of runtime-request.respond, or a thrown Error. Nothing is sent for a stale
+// request id or for an answer or decision the server did not offer.
+function askReply(ask, m) {
+  if (!ask || !m || m.requestId !== ask.id) throw new Error("that request is no longer pending");
+  if (ask.kind === "approval") {
+    if (!ask.decisions.includes(m.decision)) throw new Error("decision not offered");
+    return { decision: m.decision };
+  }
+  const answers = {};
+  for (const q of ask.questions) {
+    const v = m.answers && m.answers[q.id];
+    if (!Array.isArray(v) || !v.length || v.some((x) => typeof x !== "string")) throw new Error("answer every question");
+    if (!q.multiSelect && v.length > 1) throw new Error("one answer only: " + q.header);
+    const known = q.options.map((o) => o.label);
+    // ponytail: a custom answer is sent as a plain string in the list; its wire shape is unverified (issue #6 spike).
+    if (v.some((x) => !known.includes(x) && !(q.allowCustomAnswer && x.length <= 4000))) throw new Error("answer not offered: " + q.header);
+    answers[q.id] = v;
+  }
+  return { answers };
+}
+
 // Form body for POST /oauth/token: pairing code -> bearer (OAuth token exchange, RFC 8693).
 function exchangeForm(code) {
   return new URLSearchParams({
@@ -305,6 +354,17 @@ class T3Client extends EventEmitter {
     });
     return r.threadId;
   }
+  // Whole thread in one reply: turnItems and runtimeRequests carry the text of pending questions and approvals.
+  getProjection(threadId) {
+    return this.request("orchestration.getThreadProjection", { threadId });
+  }
+  // body: {decision} for an approval, {answers: {<question id>: [<option label>]}} for a question.
+  respond(threadId, requestId, body) {
+    return this.command("runtime-request.respond", { threadId, requestId, ...body });
+  }
+  dismissAsk(threadId, requestId) {
+    return this.command("thread.user-input.dismiss", { threadId, requestId });
+  }
   stopThread(threadId) {
     return this.command("thread.stop", { threadId });
   }
@@ -320,11 +380,16 @@ class T3Client extends EventEmitter {
   // Open threads of one project folder (not settled, not snoozed), newest-first order is the caller's job.
   list(folder) {
     const ids = new Set([...this.projects.values()].filter((p) => p.workspaceRoot === folder).map((p) => p.id));
-    return [...this.threads.values()]
-      .filter((t) => ids.has(t.projectId))
-      .map((t) => toCli(t, this.envId))
-      .filter((t) => !t.settled && !t.snoozed);
+    const all = new Map([...this.threads.values()].map((t) => [t.id, toCli(t, this.envId)]));
+    const hidden = (t) => t.settled || t.snoozed;
+    // An agent thread is hidden along with any ancestor that is settled or snoozed.
+    const gone = (t, seen = new Set()) => {
+      if (hidden(t)) return true;
+      const p = all.get(t.parentThreadId);
+      return !!p && !seen.has(p.threadId) && gone(p, seen.add(t.threadId));
+    };
+    return [...this.threads.values()].filter((t) => ids.has(t.projectId)).map((t) => all.get(t.id)).filter((t) => !gone(t));
   }
 }
 
-module.exports = { T3Client, toCli, applyShell, applyThread, exchangeForm, backoff, SCOPES };
+module.exports = { T3Client, toCli, applyShell, applyThread, pendingAsk, askReply, exchangeForm, backoff, SCOPES };
