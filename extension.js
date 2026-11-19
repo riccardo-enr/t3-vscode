@@ -243,6 +243,37 @@ async function listThreads() {
   return client.list(folder.uri.fsPath);
 }
 
+// Context for @mentions in a sent message: file contents (workspace files only, 20k chars) and the last
+// 10 messages of mentioned threads (only threads of this project). Built here, never from webview input.
+async function mentionContext(text, self) {
+  const fs = require("fs"), path = require("path");
+  const folder = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
+  const out = [];
+  const fence = (s) => "```\n" + s.replace(/```/g, "'''") + "\n```";
+  let threads;
+  for (const [, id] of text.matchAll(/@thread "[^"]*" \(([^)\s]+)\)/g)) {
+    if (id === self || out.some((o) => o.id === id)) continue;
+    try {
+      threads = threads || (await listThreads());
+      const t = threads.find((x) => x.threadId === id);
+      if (!t) continue;
+      const msgs = ((await client.getProjection(id)).messages || []).filter((x) => x.role === "user" || x.role === "assistant").slice(-10);
+      out.push({ id, s: `Thread "${t.title || id}" (last ${msgs.length} messages):\n` + fence(msgs.map((x) => `${x.role}: ${String(x.text || "").slice(0, 2000)}`).join("\n\n")) });
+    } catch (e) { } // offline or unreadable: the mention stays plain text
+  }
+  if (folder)
+    for (const [, rel] of text.matchAll(/(?:^|\s)@([^\s"]+)/g)) {
+      const abs = path.resolve(folder.uri.fsPath, rel);
+      if (!abs.startsWith(folder.uri.fsPath + path.sep) || out.some((o) => o.id === abs)) continue;
+      try {
+        const buf = fs.readFileSync(abs);
+        if (buf.includes(0)) continue; // binary
+        out.push({ id: abs, s: `File ${rel}:\n` + fence(buf.toString("utf8").slice(0, 20000)) });
+      } catch (e) { } // not a file: leave it
+    }
+  return out.length ? "\n\n" + out.map((o) => o.s).join("\n\n") : "";
+}
+
 // Pair once: a code from `t3 auth pairing create` becomes a 30-day login kept in SecretStorage.
 async function connect() {
   const code = await vscode.window.showInputBox({
@@ -457,6 +488,20 @@ class Chat {
         } catch (e) { } // offline: the menu keeps the built-in commands
         return view.webview.postMessage({ commands });
       }
+      // The @ menu: other open threads of this project, then workspace files (the webview filters).
+      if (m.mentions) {
+        const items = [];
+        try {
+          for (const t of await listThreads())
+            if (!this.thread || t.threadId !== this.thread.threadId) items.push({ name: t.title || t.threadId, desc: "thread", ins: `@thread "${(t.title || "").replace(/"/g, "'")}" (${t.threadId})` });
+        } catch (e) { } // offline: files only
+        const files = await vscode.workspace.findFiles("**/*", "**/{node_modules,.git}/**", 3000);
+        for (const f of files) {
+          const rel = vscode.workspace.asRelativePath(f);
+          items.push({ name: rel, desc: "file", ins: "@" + rel });
+        }
+        return view.webview.postMessage({ mentions: items });
+      }
       if (typeof m.fresh === "boolean" && this.thread) {
         this.fresh[m.fresh ? "add" : "delete"](this.thread.threadId);
         return this.render();
@@ -496,7 +541,8 @@ class Chat {
         // The reference is built here from the tracked editor, never from webview input.
         const id = this.thread.threadId;
         const quotes = citeLinks(client.envId, id, m.cites);
-        const body = m.ctx === true && this.ctx ? m.text + "\n\n" + ctxRef(this.ctx) : m.text;
+        const mc = await mentionContext(m.text, this.thread.threadId);
+        const body = (m.ctx === true && this.ctx ? m.text + "\n\n" + ctxRef(this.ctx) : m.text) + mc;
         const text = (quotes ? quotes + "\n\n" : "") + body.trim();
         if (!text) return view.webview.postMessage({ sendError: "nothing to send" });
         await client.send(id, text, this.fresh.has(id));

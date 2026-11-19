@@ -37,7 +37,7 @@ function inline(s) {
   s = s.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
   s = s.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (all, label, target) => {
     if (/^https?:\/\//.test(target)) return `<a data-url="${target}">${label}</a>`;
-    if (/^(\/|~\/|file:\/\/)/.test(target)) return `<a data-file="${target}">${label}</a>`;
+    if (/^(\/|~\/|file:\/\/)/.test(target) || PATHLIKE.test(target)) return `<a data-file="${target}">${label}</a>`;
     return all; // unknown scheme (javascript:, t3-*, ...): leave as text
   });
   return s.replace(/\u0000(\d+)\u0000/g, (_, i) => {
@@ -452,12 +452,15 @@ function runBuiltin(name) {
   return true;
 }
 // The menu shows while the box holds only "/word" (no space yet) and a thread is open.
+// An "@word" before the caret opens the same menu with threads and files; picking replaces the word.
+let mentions = [], atTok = null;
 function updateMenu() {
   const m = thread && /^\/(\S*)$/.exec(t.value);
-  if (!m) muted = false;
-  if (!m || muted) return (menu.hidden = true);
-  const q = m[1].toLowerCase();
-  const all = BUILTIN.concat(provCmds.filter((c) => !BUILTIN.some((b) => b.name === c.name)));
+  atTok = !m && /(^|\s)@(\S*)$/.exec(t.value.slice(0, t.selectionStart));
+  if (!m && !atTok) muted = false;
+  if ((!m && !atTok) || muted) return (menu.hidden = true);
+  const q = (m ? m[1] : atTok[2]).toLowerCase();
+  const all = m ? BUILTIN.concat(provCmds.filter((c) => !BUILTIN.some((b) => b.name === c.name))) : mentions;
   items = all
     .filter((c) => c.name.toLowerCase().includes(q))
     .sort((a, b) => !a.name.toLowerCase().startsWith(q) - !b.name.toLowerCase().startsWith(q))
@@ -468,7 +471,7 @@ function updateMenu() {
       const d = el("div", i === sel ? "sel" : "");
       d.setAttribute("role", "option");
       d.setAttribute("aria-selected", i === sel);
-      d.append(el("span", "name", "/" + c.name), el("span", "desc", c.desc));
+      d.append(el("span", "name", (c.ins ? "" : "/") + c.name), el("span", "desc", c.desc));
       d.onmousedown = (e) => (e.preventDefault(), pick(i));
       return d;
     })
@@ -478,6 +481,15 @@ function updateMenu() {
 }
 function pick(i) {
   const c = items[i];
+  if (c && c.ins && atTok) {
+    const end = t.selectionStart, from = end - atTok[2].length - 1;
+    t.value = t.value.slice(0, from) + c.ins + " " + t.value.slice(end);
+    t.selectionStart = t.selectionEnd = from + c.ins.length + 1;
+    grow();
+    updateMenu();
+    t.focus();
+    return;
+  }
   if (!c || runBuiltin(c.name)) return;
   t.value = "/" + c.name + " ";
   t.selectionStart = t.selectionEnd = t.value.length;
@@ -504,6 +516,8 @@ t.oninput = () => {
     fetchedFor = thread;
     vs.postMessage({ slash: true });
   }
+  // Refresh the @ list each time an "@" is typed (threads and files change).
+  if (t.value[t.selectionStart - 1] === "@") vs.postMessage({ mentions: true });
   updateMenu();
 };
 t.onblur = () => (menu.hidden = true);
@@ -537,6 +551,11 @@ addEventListener("message", (e) => {
   if (d.empty) { switchTo(""); emptyTxt.textContent = PICK; mode("empty"); st.textContent = ""; modelEl.textContent = ""; work.hidden = true; return; }
   if (d.loading) { switchTo(d.threadId); mode(log.children.length ? "" : "loading"); header(d); return; }
   if (d.imagePath) return insert(d.imagePath);
+  if (Array.isArray(d.mentions)) {
+    mentions = d.mentions;
+    if (document.activeElement === t) updateMenu();
+    return;
+  }
   if (Array.isArray(d.commands)) {
     provCmds = d.commands;
     if (document.activeElement === t) updateMenu();
